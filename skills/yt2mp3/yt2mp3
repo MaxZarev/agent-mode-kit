@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -eq 0 ]]; then
+    echo "Usage: yt2mp3 <youtube-url> [output-dir]"
+    echo "Example: yt2mp3 https://youtu.be/dQw4w9WgXcQ ~/Music"
+    exit 1
+fi
+
+URL="$1"
+OUTPUT_DIR="${2:-$HOME/Downloads/Audio from YouTube}"
+
+mkdir -p "$OUTPUT_DIR"
+
+echo "Downloading and converting to MP3..."
+
+yt-dlp \
+    --extract-audio \
+    --audio-format mp3 \
+    --audio-quality 0 \
+    --concurrent-fragments 4 \
+    --output "$OUTPUT_DIR/%(title)s.%(ext)s" \
+    "$URL"
+
+echo "Done! Saved to: $OUTPUT_DIR"
