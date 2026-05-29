@@ -392,7 +392,5 @@ All output passes quality verification:
 
 ## Related Skills
 
-- **marketing-context**: For capturing foundational positioning. PMM builds on this.
-- **launch-strategy**: For executing product launches planned by PMM.
-- **competitive-intel** (C-Suite): For strategic competitive intelligence.
-- **cmo-advisor** (C-Suite): For marketing budget and growth model decisions.
+- **copywriting** (included in this kit): For writing the marketing copy that delivers on the positioning defined here.
+- **marketing-psychology** (included in this kit): For psychological framing of positioning messages.

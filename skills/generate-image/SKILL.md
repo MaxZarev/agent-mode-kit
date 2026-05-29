@@ -30,9 +30,17 @@ python3 ~/.claude/skills/generate-image/generate.py "PROMPT" "OUTPUT_FILE" \
   [--ref REF1.png REF2.jpg]
 ```
 
-3. On success — show the saved path and ask if the user wants to embed it into the HTML presentation.
+3. On success — show the saved path.
 
 4. On error — if codex is missing, prompt the user to install Codex CLI and run `codex login`. If generation timed out, retry once.
+
+## ⚠️ Security note
+
+Internally `generate.py` invokes `codex exec` with `--dangerously-bypass-approvals-and-sandbox` so codex can write the generated image to the user-specified output path (which is often outside the cwd). This flag gives codex full-access in that single run.
+
+Trust boundary: codex is executing a **fixed prompt that you constructed** (image generation only, no arbitrary shell commands). Risk is low in normal use, but be aware that if you ever modify the prompt-building code to accept untrusted instructions, you are widening the blast radius. Review `generate.py` once before installing.
+
+A safer alternative if you only need to write into the current project: replace the flag with `-s workspace-write` inside `generate.py` — codex will then be sandboxed to cwd.
 
 ## Quality / size / format — when to override
 

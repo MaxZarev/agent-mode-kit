@@ -116,8 +116,6 @@ All output passes quality verification:
 
 ## Related Skills
 
-- **page-cro**: For full page optimization. Psychology provides the behavioral layer.
-- **copywriting**: For writing copy. Psychology informs the persuasion techniques.
-- **pricing-strategy**: For pricing decisions. Psychology provides the buyer behavior lens.
-- **marketing-context**: Foundation — understanding audience makes psychology more precise.
-- **ab-test-setup**: For testing which psychological approach works. Data beats theory.
+- **copywriting** (included in this kit): For writing copy. Psychology informs the persuasion techniques.
+- **marketing-strategy-pmm** (included in this kit): For positioning and GTM foundations on which psychology builds.
+- **hundred-million-offers** (included in this kit): For offer construction. Combine with psychology for irresistible offers.
