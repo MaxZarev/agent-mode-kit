@@ -118,4 +118,3 @@ All output passes quality verification:
 
 - **copywriting** (included in this kit): For writing copy. Psychology informs the persuasion techniques.
 - **marketing-strategy-pmm** (included in this kit): For positioning and GTM foundations on which psychology builds.
-- **hundred-million-offers** (included in this kit): For offer construction. Combine with psychology for irresistible offers.
