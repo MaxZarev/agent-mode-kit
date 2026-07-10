@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Form</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--card2:#1e222b;--line:#2a2f3a;--txt:#e6e8ec;
+    --mut:#9aa3b2;--acc:#3b82f6;--read:#2f6f4f;--write:#8a6d1f;--danger:#7a2a2a;--rec:#27406b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{position:sticky;top:0;z-index:10;background:rgba(15,17,21,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);padding:16px 24px}
+  h1{margin:0 0 4px;font-size:20px}
+  .sub{color:var(--mut);font-size:13px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  button{cursor:pointer;border:1px solid var(--line);background:var(--card2);color:var(--txt);
+    padding:8px 14px;border-radius:8px;font-size:13px}
+  button:hover{border-color:#3a414f}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  button.ghost{background:transparent}
+  .count{margin-left:auto;color:var(--mut);font-size:13px}.count b{color:var(--txt)}
+  main{max-width:1000px;margin:0 auto;padding:20px 24px 150px}
+  .group h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);
+    margin:22px 0 10px;font-weight:700}
+  .row{display:flex;gap:12px;align-items:flex-start;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:12px 14px;margin-bottom:8px;transition:border-color .12s,background .12s}
+  label.row{cursor:pointer}
+  .row.on{border-color:#37506b;background:#161d27}
+  .row input[type=checkbox],.row input[type=radio]{margin-top:3px;width:18px;height:18px;accent-color:var(--acc);cursor:pointer;flex:0 0 auto}
+  .tbody{flex:1;min-width:0}
+  label.tick{display:flex;gap:12px;align-items:flex-start;cursor:pointer;margin:0}
+  textarea.cmt{width:100%;margin-top:7px;background:var(--card2);color:var(--txt);border:1px solid var(--line);
+    border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;resize:none;overflow:hidden;min-height:32px;line-height:1.4}
+  textarea.cmt::placeholder{color:#5f6875}
+  .tname{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
+  .badge{font-size:10.5px;padding:1px 7px;border-radius:999px;margin-left:8px;vertical-align:middle;
+    font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+  .b-read{background:var(--read);color:#d7ffe9}.b-write{background:var(--write);color:#fff3d1}
+  .b-danger{background:var(--danger);color:#ffd9d9}.b-rec{background:var(--rec);color:#cfe0ff}
+  .b-default{background:#33384a;color:#cdd3df}
+  .desc{color:var(--mut);font-size:13px;margin-top:3px}
+  .field label{display:block;font-weight:600;margin-bottom:6px;font-size:14px}
+  .field input[type=text],.field textarea,.field select{width:100%;background:var(--card2);color:var(--txt);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;font-family:inherit}
+  .field textarea{min-height:72px;resize:vertical}
+  .field .rng{display:flex;align-items:center;gap:12px}
+  .field input[type=range]{flex:1;accent-color:var(--acc)}
+  .opts{display:flex;flex-direction:column;gap:6px}
+  footer{position:fixed;left:0;right:0;bottom:0;background:rgba(15,17,21,.96);backdrop-filter:blur(8px);
+    border-top:1px solid var(--line);padding:12px 24px}
+  .fwrap{max-width:1000px;margin:0 auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  textarea#out{flex:1;min-width:280px;height:64px;background:var(--card2);color:var(--txt);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-family:ui-monospace,monospace;font-size:12px;resize:vertical}
+  .ok{color:#4ade80;font-size:13px;min-height:16px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <div class="sub" id="subtitle"></div>
+  <div class="bar">
+    <button class="primary" onclick="copyResult()">📋 Скопировать результат</button>
+    <button class="ghost" onclick="setAll(true)">Выбрать все</button>
+    <button class="ghost" onclick="setAll(false)">Снять все</button>
+    <button class="ghost" onclick="resetRec()">Сбросить к рекомендованным</button>
+    <span class="count" id="count"></span>
+  </div>
+</header>
+<main id="app"></main>
+<footer>
+  <div class="fwrap">
+    <textarea id="out" readonly placeholder="Нажми «Скопировать результат», затем вставь блок в чат."></textarea>
+    <div>
+      <button class="primary" onclick="copyResult()">📋 Скопировать</button>
+      <div class="ok" id="okmsg"></div>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* =========================================================================
+   EDIT ONLY THIS BLOCK. Everything below the line is the reusable engine.
+   ========================================================================= */
+const TITLE = "Заголовок формы";
+const SUBTITLE = "Короткое пояснение: что отметить и что делать дальше.";
+
+const ITEMS = [
+  {type:"section", label:"Пример секции"},
+  {type:"checkbox", id:"option-a", label:"option-a", desc:"Пояснение к опции A", badge:"read", checked:true},
+  {type:"checkbox", id:"option-b", label:"option-b", desc:"Опция с полем комментария (многострочное, авторастёт)", badge:"write", comment:true},
+  {type:"checkbox", id:"option-c", label:"option-c", desc:"Опасная операция", badge:"danger"},
+
+  {type:"section", label:"Другие типы полей (удали ненужное)"},
+  {type:"radio",    id:"mode",  label:"Режим", options:["быстрый","обычный","подробный"], value:"обычный"},
+  {type:"select",   id:"prio",  label:"Приоритет", options:["p1","p2","p3","p4"], value:"p4"},
+  {type:"text",     id:"name",  label:"Название", placeholder:"введи текст"},
+  {type:"textarea", id:"notes", label:"Заметки"},
+  {type:"slider",   id:"limit", label:"Лимит", min:0, max:100, step:5, value:20},
+];
+/* ========================== ENGINE BELOW — leave as-is ===================== */
+
+document.getElementById("title").textContent = TITLE;
+document.title = TITLE;
+document.getElementById("subtitle").textContent = SUBTITLE;
+const app = document.getElementById("app");
+
+let curGroup = null;
+function ensureGroup(){
+  if(!curGroup){ curGroup=document.createElement("div"); curGroup.className="group"; app.appendChild(curGroup); }
+  return curGroup;
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+ITEMS.forEach(it=>{
+  if(it.type==="section"){
+    curGroup=document.createElement("div"); curGroup.className="group";
+    const h=document.createElement("h2"); h.textContent=it.label; curGroup.appendChild(h); app.appendChild(curGroup); return;
+  }
+  const g=ensureGroup();
+  if(it.type==="checkbox"){
+    const d=document.createElement("div"); d.className="row";
+    d.innerHTML=`<div class="tbody">
+      <label class="tick"><input type="checkbox" data-kind="checkbox" data-id="${esc(it.id)}" ${it.checked?"checked":""}>
+      <span><span class="tname">${esc(it.label||it.id)}</span>
+      ${it.badge?`<span class="badge b-${esc(it.badge)}">${esc(it.badge)}</span>`:""}
+      ${it.checked?'<span class="badge b-rec">рек.</span>':""}
+      ${it.desc?`<div class="desc">${esc(it.desc)}</div>`:""}</span></label>
+      ${it.comment?`<textarea class="cmt" rows="1" data-kind="comment" data-id="комм: ${esc(it.id)}"
+        placeholder="${esc(typeof it.comment==="string"?it.comment:"комментарий (можно несколько строк)…")}"
+        oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>`:""}</div>`;
+    g.appendChild(d);
+  } else if(it.type==="radio"){
+    const d=document.createElement("div"); d.className="row field";
+    let opts=it.options.map(o=>`<label style="display:flex;gap:8px;align-items:center;font-weight:400;cursor:pointer;margin:0">
+      <input type="radio" name="${esc(it.id)}" data-kind="radio" data-id="${esc(it.id)}" value="${esc(o)}" ${o===it.value?"checked":""}> ${esc(o)}</label>`).join("");
+    d.innerHTML=`<div class="tbody"><label>${esc(it.label)}</label><div class="opts">${opts}</div></div>`; g.appendChild(d);
+  } else if(it.type==="select"){
+    const d=document.createElement("div"); d.className="row field";
+    let opts=it.options.map(o=>`<option ${o===it.value?"selected":""}>${esc(o)}</option>`).join("");
+    d.innerHTML=`<div class="tbody"><label>${esc(it.label)}</label><select data-kind="value" data-id="${esc(it.id)}">${opts}</select></div>`; g.appendChild(d);
+  } else if(it.type==="text"){
+    const d=document.createElement("div"); d.className="row field";
+    d.innerHTML=`<div class="tbody"><label>${esc(it.label)}</label><input type="text" data-kind="value" data-id="${esc(it.id)}" placeholder="${esc(it.placeholder||"")}" value="${esc(it.value||"")}"></div>`; g.appendChild(d);
+  } else if(it.type==="textarea"){
+    const d=document.createElement("div"); d.className="row field";
+    d.innerHTML=`<div class="tbody"><label>${esc(it.label)}</label><textarea data-kind="value" data-id="${esc(it.id)}">${esc(it.value||"")}</textarea></div>`; g.appendChild(d);
+  } else if(it.type==="slider"){
+    const d=document.createElement("div"); d.className="row field";
+    d.innerHTML=`<div class="tbody"><label>${esc(it.label)}: <span class="sv">${esc(it.value??it.min)}</span></label>
+      <div class="rng"><input type="range" data-kind="value" data-id="${esc(it.id)}" min="${it.min}" max="${it.max}" step="${it.step||1}" value="${it.value??it.min}"
+      oninput="this.closest('.field').querySelector('.sv').textContent=this.value"></div></div>`; g.appendChild(d);
+  }
+});
+
+const cbs = ()=>[...document.querySelectorAll('input[data-kind=checkbox]')];
+function refresh(){
+  let n=0; cbs().forEach(b=>{ const on=b.checked; b.closest('.row').classList.toggle('on',on); if(on)n++; });
+  const t=cbs().length; document.getElementById("count").innerHTML = t?`Выбрано: <b>${n}</b> / ${t}`:"";
+}
+app.addEventListener("change", refresh);
+function setAll(v){ cbs().forEach(b=>b.checked=v); refresh(); }
+function resetRec(){ cbs().forEach(b=>b.checked=b.defaultChecked); refresh(); }
+
+function buildResult(){
+  const on=[],off=[],fields=[];
+  const enc=v=>String(v).replace(/\r?\n/g,"\\n"); // многострочные значения → \n, чтобы каждая пара оставалась одной строкой
+  cbs().forEach(b=>(b.checked?on:off).push(b.dataset.id));
+  document.querySelectorAll('[data-kind=value]').forEach(el=>fields.push(`${el.dataset.id} = ${enc(el.value)}`));
+  document.querySelectorAll('textarea[data-kind=comment]').forEach(el=>{
+    if(el.value.trim()!=="") fields.push(`${el.dataset.id} = ${enc(el.value.trim())}`);
+  });
+  document.querySelectorAll('input[data-kind=radio]:checked').forEach(el=>fields.push(`${el.dataset.id} = ${el.value}`));
+  let out=`=== FORM RESULT: ${TITLE} ===\n`;
+  if(cbs().length){ out+=`\n[checkboxes]\nON: ${on.join(", ")||"(none)"}\nOFF: ${off.join(", ")||"(none)"}\n`; }
+  if(fields.length){ out+=`\n[fields]\n${fields.join("\n")}\n`; }
+  return out;
+}
+async function copyResult(){
+  const txt=buildResult(); const ta=document.getElementById("out"); ta.value=txt;
+  const ok=document.getElementById("okmsg");
+  try{ await navigator.clipboard.writeText(txt); ok.textContent="✅ Скопировано!"; }
+  catch(e){ ta.focus(); ta.select();
+    try{ document.execCommand("copy"); ok.textContent="✅ Скопировано (или выдели и Cmd+C)"; }
+    catch(e2){ ok.textContent="⚠️ Выдели текст в поле и Cmd+C"; } }
+  setTimeout(()=>ok.textContent="",4000);
+}
+refresh();
+</script>
+</body>
+</html>

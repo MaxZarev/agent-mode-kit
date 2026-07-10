@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Возвращает (печатает абсолютным путём) рабочую папку, куда конвейер «спека-первая»
+# кладёт короткоживущие артефакты: брифы этапов, отчёты исполнителя, review-пакеты.
+# Единый источник пути — чтобы task-brief и review-package не разошлись.
+# (Лента прогресса теперь живёт не здесь, а в блоке ## Прогон самого плана.)
+#
+# Адаптация superpowers subagent-driven-development для студентов:
+#   * артефакты под .spec-first/sdd/<слаг-прогона>/ (а не .superpowers/sdd/);
+#   * работает БЕЗ git — нативная версия зовёт `git rev-parse --show-toplevel`
+#     под `set -euo pipefail` и аварийно падает вне репозитория, что роняло бы
+#     task-brief/review-package на 1-м этапе не-кодовой (no-git) задачи.
+#
+# Usage: sdd-workspace [SLUG]
+#   без SLUG → <корень>/.spec-first/sdd          (обратная совместимость)
+#   со SLUG  → <корень>/.spec-first/sdd/<SLUG>   (своя папка на каждый прогон/план)
+set -euo pipefail
+
+# Слаг прогона (опц.): своя папка под каждый план, чтобы параллельные прогоны не пересекались.
+slug="${1:-}"
+slug="${slug##*/}"   # отбросить любой путь (защита от ../) — оставить basename
+slug="${slug%.md}"   # на случай если передали имя плана с расширением
+
+# Корень проекта: git top-level если это репозиторий, иначе текущая папка
+# (в Claude Desktop агент запускается из корня проекта).
+if root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  has_git=1
+else
+  root=$(pwd)
+  has_git=0
+fi
+
+base="$root/.spec-first/sdd"
+if [ -n "$slug" ]; then
+  dir="$base/$slug"
+else
+  dir="$base"
+fi
+mkdir -p "$dir"
+
+# Держим scratch вне git status / случайных коммитов — только когда git есть.
+# .gitignore на уровне .spec-first/sdd покрывает все папки прогонов.
+if [ "$has_git" -eq 1 ]; then
+  mkdir -p "$base"
+  printf '*\n' > "$base/.gitignore"
+fi
+
+cd "$dir" && pwd

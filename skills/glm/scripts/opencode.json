@@ -1,0 +1,55 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "zai-web-search": {
+      "type": "local",
+      "command": [
+        "npx", "-y", "mcp-remote",
+        "https://api.z.ai/api/mcp/web_search_prime/mcp",
+        "--header", "Authorization:${AUTH_HEADER}",
+        "--transport", "http-only"
+      ],
+      "environment": { "AUTH_HEADER": "Bearer {env:ZAI_API_KEY}" },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "zai-web-reader": {
+      "type": "local",
+      "command": [
+        "npx", "-y", "mcp-remote",
+        "https://api.z.ai/api/mcp/web_reader/mcp",
+        "--header", "Authorization:${AUTH_HEADER}",
+        "--transport", "http-only"
+      ],
+      "environment": { "AUTH_HEADER": "Bearer {env:ZAI_API_KEY}" },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "zai-zread": {
+      "type": "local",
+      "command": [
+        "npx", "-y", "mcp-remote",
+        "https://api.z.ai/api/mcp/zread/mcp",
+        "--header", "Authorization:${AUTH_HEADER}",
+        "--transport", "http-only"
+      ],
+      "environment": { "AUTH_HEADER": "Bearer {env:ZAI_API_KEY}" },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "tavily": {
+      "type": "local",
+      "command": ["npx", "-y", "tavily-mcp@0.2.20"],
+      "environment": { "TAVILY_API_KEY": "{env:TAVILY_API_KEY}" },
+      "timeout": 120000,
+      "enabled": true
+    },
+    "firecrawl": {
+      "type": "local",
+      "command": ["npx", "-y", "firecrawl-mcp@3.22.3"],
+      "environment": { "FIRECRAWL_API_KEY": "{env:FIRECRAWL_API_KEY}" },
+      "timeout": 120000,
+      "enabled": true
+    }
+  }
+}

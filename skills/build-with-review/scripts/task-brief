@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Вырезает полный текст одного этапа из плана в отдельный файл, который исполнитель
+# читает за один вызов — текст этапа не проходит через контекст контроллера.
+#
+# Адаптация superpowers subagent-driven-development: матчит русские заголовки плана
+# «### Этап N» (не «# Task N»); секция этапа заканчивается на следующем заголовке
+# (включая «## Бэклог»); путь по умолчанию берётся из sdd-workspace (работает без git).
+#
+# Usage: task-brief PLAN_FILE STAGE_NUMBER [OUTFILE]
+# Default OUTFILE: <корень>/.spec-first/sdd/<слаг-плана>/etap-<N>-brief.md
+#   (слаг = имя файла плана без расширения — своя папка на каждый прогон)
+set -euo pipefail
+
+if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+  echo "usage: task-brief PLAN_FILE STAGE_NUMBER [OUTFILE]" >&2
+  exit 2
+fi
+
+plan=$1
+n=$2
+[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+
+if [ $# -eq 3 ]; then
+  out=$3
+else
+  slug=$(basename "$plan"); slug=${slug%.*}    # имя плана без расширения = слаг прогона
+  # через bash, чтобы не зависеть от exec-бита (zip на Windows его не сохраняет)
+  dir=$(bash "$(cd "$(dirname "$0")" && pwd)/sdd-workspace" "$slug")
+  out="$dir/etap-${n}-brief.md"
+fi
+
+awk -v n="$n" '
+  /^```/ { infence = !infence }
+  !infence && /^#+[ \t]+Этап[ \t]+[0-9]+/ {
+    intask = ($0 ~ ("^#+[ \t]+Этап[ \t]+" n "([^0-9]|$)"))
+  }
+  !infence && intask && /^#+[ \t]/ && $0 !~ /^#+[ \t]+Этап[ \t]+[0-9]/ { intask = 0 }
+  intask { print }
+' "$plan" > "$out"
+
+if [ ! -s "$out" ]; then
+  echo "stage ${n} not found in ${plan} (no heading matching 'Этап ${n}')" >&2
+  exit 3
+fi
+
+echo "wrote ${out}: $(wc -l < "$out" | tr -d ' ') lines"

@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Название презентации</title>
+<style>
+  :root {
+    --bg: #101418;
+    --card: #1a2027;
+    --card-border: #2a323c;
+    --text: #eef2f6;
+    --muted: #93a1b0;
+    --accent: #f5a623;
+    --answer-bg: #141a20;
+    --badge-bg: #232c36;
+    --green: #4cc38a;
+    --red: #e5534b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "SF Pro Display", -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .stage {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4vh 6vw;
+    cursor: default;
+  }
+  .slide {
+    width: min(1100px, 100%);
+    display: none;
+    flex-direction: column;
+    gap: 3vh;
+  }
+  .slide.active { display: flex; }
+
+  .badges { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .badge {
+    background: var(--badge-bg);
+    color: var(--muted);
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    padding: 7px 18px;
+    font-size: clamp(13px, 1.6vh, 17px);
+    letter-spacing: .02em;
+  }
+  .badge.acc { color: var(--accent); border-color: rgba(245,166,35,.35); }
+  .badge.chat { color: var(--green); border-color: rgba(76,195,138,.35); }
+
+  h2 {
+    font-size: clamp(26px, 4.8vh, 46px);
+    line-height: 1.15;
+    font-weight: 700;
+  }
+  h2 em { color: var(--accent); font-style: normal; }
+  .lead {
+    color: var(--muted);
+    font-size: clamp(17px, 2.5vh, 24px);
+    line-height: 1.45;
+  }
+  .lead b { color: var(--text); }
+
+  /* Раскрывающиеся элементы */
+  .frag { visibility: hidden; opacity: 0; transform: translateY(10px); }
+  .frag.on {
+    visibility: visible; opacity: 1; transform: none;
+    transition: opacity .3s ease, transform .3s ease;
+  }
+
+  /* Списки-пункты */
+  .items { display: flex; flex-direction: column; gap: 1.9vh; }
+  .item {
+    display: flex; gap: 18px; align-items: baseline;
+    font-size: clamp(18px, 2.8vh, 27px);
+    line-height: 1.4;
+  }
+  .item .n {
+    color: var(--accent);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    flex: 0 0 1.4em;
+    text-align: right;
+  }
+  .item .ic { flex: 0 0 1.4em; text-align: center; }
+  .item b { color: var(--accent); font-weight: 650; }
+  .item .sub {
+    display: block;
+    color: var(--muted);
+    font-size: clamp(15px, 2.1vh, 20px);
+    margin-top: .35em;
+  }
+  .item .sub b { color: var(--text); }
+
+  /* Карточки в два столбца */
+  .cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 20px;
+    padding: clamp(22px, 3.6vh, 38px) clamp(22px, 2.6vw, 38px);
+    display: flex; flex-direction: column; gap: 1.6vh;
+  }
+  .card h3 { font-size: clamp(19px, 3vh, 28px); }
+  .card h3 em { color: var(--accent); font-style: normal; }
+  .card p { color: var(--muted); font-size: clamp(15px, 2.2vh, 21px); line-height: 1.5; }
+  .card p b { color: var(--text); }
+
+  /* Цитаты-реплики (аналогия) */
+  .quote {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 20px;
+    padding: clamp(20px, 3.2vh, 36px) clamp(24px, 3vw, 44px);
+    font-size: clamp(18px, 2.9vh, 28px);
+    line-height: 1.4;
+    font-weight: 550;
+  }
+  .quote::before { content: "«"; color: var(--accent); }
+  .quote::after  { content: "»"; color: var(--accent); }
+  .quote .who {
+    display: block;
+    margin-top: 1.2vh;
+    font-size: clamp(14px, 2vh, 18px);
+    font-weight: 400;
+    color: var(--muted);
+  }
+  .quote .who b { color: var(--accent); }
+
+  .punch {
+    font-size: clamp(20px, 3.4vh, 34px);
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .punch em { color: var(--accent); font-style: normal; }
+
+  /* Квиз */
+  .opts { display: flex; flex-direction: column; gap: 1.6vh; }
+  .opt {
+    background: var(--badge-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: clamp(14px, 2.2vh, 22px) clamp(18px, 2vw, 28px);
+    font-size: clamp(16px, 2.5vh, 24px);
+    line-height: 1.35;
+    display: flex; gap: 16px; align-items: baseline;
+  }
+  .opt .n { color: var(--accent); font-weight: 700; flex: 0 0 1.1em; }
+  .revealed .opt.correct { border-color: var(--green); }
+  .revealed .opt.correct .n { color: var(--green); }
+  .revealed .opt:not(.correct) { opacity: .45; }
+
+  /* Ответ / дебриф */
+  .answer {
+    background: var(--answer-bg);
+    border: 1px dashed var(--card-border);
+    border-radius: 18px;
+    padding: clamp(18px, 3vh, 32px) clamp(22px, 2.8vw, 40px);
+    display: flex; flex-direction: column; gap: 1.4vh;
+  }
+  .answer .verdict { color: var(--green); font-weight: 700; font-size: clamp(17px, 2.6vh, 25px); }
+  .answer .debrief { color: var(--muted); font-size: clamp(15px, 2.3vh, 22px); line-height: 1.5; }
+  .answer .debrief b { color: var(--text); }
+
+  /* Пары «размыто → проверяемо» */
+  .pair {
+    display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: clamp(14px, 2.4vh, 24px) clamp(18px, 2vw, 28px);
+    font-size: clamp(15px, 2.3vh, 22px);
+    line-height: 1.4;
+  }
+  .pair .bad { color: var(--red); }
+  .pair .arr { color: var(--muted); font-size: 1.2em; }
+  .pair .good { color: var(--green); }
+
+  /* Титульный и разделители */
+  .title-slide h1 {
+    font-size: clamp(36px, 7vh, 68px);
+    line-height: 1.12;
+  }
+  .title-slide h1 em { color: var(--accent); font-style: normal; }
+  .title-slide .route {
+    font-size: clamp(18px, 2.8vh, 27px);
+    color: var(--muted);
+  }
+  .title-slide .route b { color: var(--text); }
+
+  .divider { align-items: flex-start; justify-content: center; min-height: 50vh; }
+  .divider .no {
+    color: var(--accent);
+    font-size: clamp(16px, 2.4vh, 22px);
+    letter-spacing: .25em;
+    font-weight: 600;
+  }
+  .divider h2 { font-size: clamp(34px, 6.4vh, 62px); }
+  .divider .lead { max-width: 780px; }
+
+  /* Ссылка-кнопка */
+  .go {
+    display: inline-flex; align-items: center; gap: 12px;
+    background: var(--accent); color: #101418;
+    border-radius: 14px;
+    padding: 14px 26px;
+    font-size: clamp(16px, 2.5vh, 23px);
+    font-weight: 700;
+    text-decoration: none;
+    width: fit-content;
+  }
+  .rules { display: flex; flex-direction: column; gap: 1.4vh; font-size: clamp(16px, 2.5vh, 24px); }
+  .rules .row { display: flex; align-items: baseline; gap: 16px; }
+  .rules .p { white-space: nowrap; }
+  .rules b { color: var(--accent); }
+
+  .note { color: var(--muted); font-size: clamp(14px, 2vh, 18px); line-height: 1.5; }
+  .note b { color: var(--accent); }
+
+  /* Иллюстрации */
+  .pic {
+    display: block;
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    max-width: 100%;
+  }
+  .pic.banner { margin: 0 auto; max-height: 30vh; width: auto; }
+  .pic.tall { max-height: 42vh; width: auto; }
+  .split { display: grid; grid-template-columns: 3fr 2fr; gap: 32px; align-items: center; }
+  .split .col { display: flex; flex-direction: column; gap: 1.9vh; min-width: 0; }
+  .split .pic { width: 100%; }
+
+  /* Управление */
+  .controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 28px 18px;
+    color: var(--muted);
+    font-size: 14px;
+    user-select: none;
+  }
+  .controls .keys span {
+    background: var(--badge-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 7px;
+    padding: 3px 9px;
+    margin: 0 3px;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  .controls button {
+    background: var(--badge-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 8px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    margin-left: 8px;
+  }
+  .controls button:hover { border-color: var(--accent); }
+  .counter { font-variant-numeric: tabular-nums; }
+
+  .bar { height: 3px; background: var(--badge-bg); }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s ease; }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+
+<!-- ═══════════ ТИТУЛ ═══════════
+     Замените все демо-слайды ниже своим содержанием.
+     Правила: первый элемент слайда виден сразу, всё остальное — class="frag"
+     (раскрывается пробелом/кликом по одному). -->
+<section class="slide title-slide">
+  <div class="badges"><span class="badge">Курс · встреча N</span></div>
+  <h1>Тема встречи:<br><em>ключевая мысль</em> в одной строке</h1>
+  <div class="route">маршрут → встречи → одной → строкой</div>
+  <div class="note">Формат интерактива: отвечаем <b>цифрами и словами в чат</b>.</div>
+</section>
+
+<!-- ═══════════ РАЗДЕЛИТЕЛЬ БЛОКА ═══════════
+     Один divider на каждый крупный блок плана. Номер = номер блока. -->
+<section class="slide divider">
+  <div class="no">01</div>
+  <h2>Название блока</h2>
+  <div class="lead">Одна фраза: что в этом блоке и зачем он аудитории.</div>
+</section>
+
+<!-- Список с иконками: каждый пункт — frag, ключевые слова — <b> -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Список тезисов с иконками</h2>
+  <div class="items">
+    <div class="item frag"><span class="ic">✅</span><span>Короткий тезис, <b>ключевое слово</b> жирным</span></div>
+    <div class="item frag"><span class="ic">⚠️</span><span>Тезис с пояснением мелким шрифтом
+      <span class="sub">→ пояснение или пример — сюда, а не в основную строку</span></span></div>
+    <div class="item frag"><span class="ic">💡</span><span>Не больше 5–6 пунктов на слайд</span></div>
+  </div>
+</section>
+
+<!-- Нумерованный список: шаги процесса -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Шаги процесса</h2>
+  <div class="items">
+    <div class="item frag"><span class="n">1</span><span>Первый шаг — <b>что происходит</b> <span class="sub">кто делает</span></span></div>
+    <div class="item frag"><span class="n">2</span><span>Второй шаг</span></div>
+    <div class="item frag"><span class="n">3</span><span>Третий шаг</span></div>
+  </div>
+</section>
+
+<!-- Сравнение двух сущностей: вторая карточка — frag -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Сравнение: А против Б</h2>
+  <div class="cards2">
+    <div class="card">
+      <h3>📋 Сущность А — <em>суть</em></h3>
+      <p>Чем является, из чего состоит.</p>
+      <p><b>Кто отвечает</b> — и когда меняется.</p>
+    </div>
+    <div class="card frag">
+      <h3>🗺️ Сущность Б — <em>суть</em></h3>
+      <p>Чем является, из чего состоит.</p>
+      <p><b>Кто отвечает</b> — и когда меняется.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Аналогия через реплики + вывод-панч -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Аналогия из жизни</h2>
+  <div class="quote">Реплика первой стороны — узнаваемая бытовая ситуация
+    <span class="who">кто говорит — <b>что это иллюстрирует</b></span>
+  </div>
+  <div class="quote frag">Ответная реплика второй стороны
+    <span class="who">кто говорит — <b>что это иллюстрирует</b></span>
+  </div>
+  <div class="punch frag">Вывод одной строкой: <em>акцент</em> оранжевым.</div>
+</section>
+
+<!-- ═══════════ ИНТЕРАКТИВ: КВИЗ ═══════════
+     Бейдж «цифра в чат» = аудитория голосует ДО раскрытия ответа.
+     data-reveal на answer подсвечивает правильный вариант и гасит остальные. -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span><span class="badge chat">цифра в чат</span></div>
+  <h2>Мини-квиз: вопрос?</h2>
+  <div class="opts">
+    <div class="opt"><span class="n">1</span><span>Неверный, но правдоподобный вариант</span></div>
+    <div class="opt correct"><span class="n">2</span><span>Правильный вариант</span></div>
+    <div class="opt"><span class="n">3</span><span>Ещё один неверный вариант-обманка</span></div>
+  </div>
+  <div class="answer frag" data-reveal>
+    <div class="verdict">Ответ: 2</div>
+    <div class="debrief">Почему именно так — <b>одно предложение</b> с сутью, а не пересказ слайда.</div>
+  </div>
+</section>
+
+<!-- Открытый вопрос в чат + скрытый разбор (можно несколько answer подряд) -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span><span class="badge chat">словами в чат</span></div>
+  <h2>Провокация / открытый вопрос</h2>
+  <div class="punch">Вопрос аудитории, на который <em>нет</em> очевидного ответа?</div>
+  <div class="answer frag">
+    <div class="verdict">Тезис разбора 1</div>
+    <div class="debrief">Раскрытие первой части ответа.</div>
+  </div>
+  <div class="answer frag">
+    <div class="verdict">Тезис разбора 2</div>
+    <div class="debrief">Раскрытие второй части ответа.</div>
+  </div>
+</section>
+
+<!-- Задача с оценкой сложности перчиками (вариант для игр-голосовалок) -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span><span class="badge chat">цифра в чат</span></div>
+  <h2>Задача: формулировка задачи для оценки</h2>
+  <div class="lead">Контекст задачи: кто просит, что на входе, что хочет на выходе.</div>
+  <div class="answer frag" data-reveal>
+    <div class="verdict">🌶️🌶️ · Категория ответа</div>
+    <div class="debrief"><b>Почему:</b> обоснование оценки одним-двумя предложениями.</div>
+  </div>
+</section>
+
+<!-- Пары «плохо → хорошо» -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Было размыто → стало проверяемо</h2>
+  <div class="items">
+    <div class="pair frag"><span class="bad">«Размытая формулировка»</span><span class="arr">→</span><span class="good">Конкретная проверяемая формулировка</span></div>
+    <div class="pair frag"><span class="bad">«Ещё одна размытая»</span><span class="arr">→</span><span class="good">Её проверяемая версия</span></div>
+  </div>
+</section>
+
+<!-- Текст + картинка в две колонки (картинки кладите рядом, путь относительный) -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Тезисы + иллюстрация</h2>
+  <div class="split">
+    <div class="col">
+      <div class="item frag"><span class="ic">🎯</span><span>Тезис рядом с картинкой</span></div>
+      <div class="item frag"><span class="ic">🧩</span><span>Ещё тезис</span></div>
+      <div class="punch frag">Вывод <em>одной строкой</em>.</div>
+    </div>
+    <img class="pic" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Crect width='400' height='300' fill='%231a2027'/%3E%3Ctext x='200' y='155' fill='%2393a1b0' font-family='sans-serif' font-size='20' text-anchor='middle'%3Eassets/картинка.png%3C/text%3E%3C/svg%3E" alt="Замените на свою иллюстрацию">
+  </div>
+</section>
+
+<!-- Картинка-баннер во всю ширину (появляется по клику) -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span></div>
+  <h2>Схема или диаграмма</h2>
+  <div class="lead">Подводка к схеме — картинка раскрывается после неё.</div>
+  <img class="pic banner frag" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='700' height='260'%3E%3Crect width='700' height='260' fill='%231a2027'/%3E%3Ctext x='350' y='135' fill='%2393a1b0' font-family='sans-serif' font-size='20' text-anchor='middle'%3Eassets/схема.png%3C/text%3E%3C/svg%3E" alt="Замените на свою схему">
+</section>
+
+<!-- Слайд-ссылка на внешнюю активность (голосовалка, демо, файл) -->
+<section class="slide">
+  <div class="badges"><span class="badge">01 · блок</span><span class="badge chat">голосуем в чат</span></div>
+  <h2>Игра: правила</h2>
+  <div class="rules">
+    <div class="row"><span class="p">🌶️</span><span><b>1</b> — первая категория</span></div>
+    <div class="row"><span class="p">🌶️🌶️</span><span><b>2</b> — вторая категория</span></div>
+    <div class="row"><span class="p">🌶️🌶️🌶️</span><span><b>3</b> — третья категория</span></div>
+  </div>
+  <div class="note">Как играем: читаем → голосуете цифрой в чат → открываем ответ.</div>
+  <a class="go" href="vote-slides.html" target="_blank">Открыть голосовалку →</a>
+</section>
+
+<!-- ═══════════ ФИНАЛ ═══════════ -->
+<section class="slide">
+  <div class="badges"><span class="badge">итог</span></div>
+  <h2>Три строчки на память</h2>
+  <div class="items">
+    <div class="item"><span class="ic">1️⃣</span><span>Первая мысль — <b>суть</b></span></div>
+    <div class="item"><span class="ic">2️⃣</span><span>Вторая мысль</span></div>
+    <div class="item"><span class="ic">3️⃣</span><span>Третья мысль</span></div>
+  </div>
+  <div class="punch">Вопросы?</div>
+</section>
+
+</div>
+
+<div class="bar"><i id="bar"></i></div>
+<div class="controls">
+  <div class="keys">
+    <span>←</span><span>→</span> слайды &nbsp;·&nbsp; <span>Пробел</span> / клик — раскрыть
+  </div>
+  <div class="counter" id="counter"></div>
+  <div>
+    <button id="btnPrev">← Назад</button>
+    <button id="btnReveal">Раскрыть</button>
+    <button id="btnNext">Дальше →</button>
+  </div>
+</div>
+
+<script>
+const slides = Array.from(document.querySelectorAll(".slide"));
+const counter = document.getElementById("counter");
+const bar = document.getElementById("bar");
+let cur = 0;
+slides[0].classList.add("active");
+
+function show(idx) {
+  cur = Math.max(0, Math.min(slides.length - 1, idx));
+  slides.forEach((s, i) => s.classList.toggle("active", i === cur));
+  counter.textContent = (cur + 1) + " / " + slides.length;
+  bar.style.width = ((cur + 1) / slides.length * 100) + "%";
+}
+
+// раскрыть следующий элемент; если всё раскрыто — false
+function revealNext() {
+  const s = slides[cur];
+  const next = s.querySelector(".frag:not(.on)");
+  if (!next) return false;
+  next.classList.add("on");
+  if (next.hasAttribute("data-reveal") || next.classList.contains("answer")) {
+    s.classList.add("revealed");
+  }
+  return true;
+}
+
+document.getElementById("btnPrev").onclick   = () => show(cur - 1);
+document.getElementById("btnNext").onclick   = () => show(cur + 1);
+document.getElementById("btnReveal").onclick = revealNext;
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight" || e.key === "PageDown") show(cur + 1);
+  else if (e.key === "ArrowLeft" || e.key === "PageUp") show(cur - 1);
+  else if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown") {
+    e.preventDefault();
+    if (!revealNext()) show(cur + 1);   // всё раскрыто → следующий слайд
+  }
+});
+
+// клик по слайду = раскрыть следующий элемент (ссылки и кнопки не трогаем)
+document.getElementById("stage").addEventListener("click", (e) => {
+  if (e.target.closest("a, button")) return;
+  revealNext();
+});
+
+show(0);
+</script>
+</body>
+</html>
