@@ -242,9 +242,21 @@ def main() -> int:
         help="Seconds to wait between retry attempts (default: 10)",
     )
     parser.add_argument(
+        "--ref",
+        nargs="+",
+        dest="ref_images",
+        default=[],
+        metavar="IMG",
+        help=(
+            "Reference image path(s) for style/subject matching, e.g. "
+            "--ref style.png subject.jpg. Tip: put any aspect ratio BEFORE "
+            "--ref so it is not swallowed as a path."
+        ),
+    )
+    parser.add_argument(
         "extras",
         nargs="*",
-        help="Optional aspect ratio (e.g. 16:9) and/or `--ref <paths...>`",
+        help="Optional aspect ratio (e.g. 16:9). A bare `--ref <paths...>` is also accepted here for back-compat.",
     )
     args = parser.parse_args()
 
@@ -260,7 +272,19 @@ def main() -> int:
         print("ERROR: `codex` CLI not found in PATH. Install: https://github.com/openai/codex", file=sys.stderr)
         return 1
 
-    aspect_ratio, ref_images = parse_extras(args.extras)
+    # `--ref` is now a real flag (args.ref_images); parse_extras still pulls the
+    # aspect ratio out of the positional extras (and tolerates a legacy bare
+    # `--ref` left there). Merge both sources.
+    aspect_ratio, extra_refs = parse_extras(args.extras)
+    ref_images = list(args.ref_images) + extra_refs
+    # nargs="+" is greedy: `--ref a.png 16:9` swallows the aspect ratio as a path.
+    # Recover any aspect token that landed in refs, and drop it from the ref list.
+    if aspect_ratio is None:
+        for tok in ref_images:
+            if tok in ASPECT_RATIOS:
+                aspect_ratio = tok
+                break
+    ref_images = [r for r in ref_images if r not in ASPECT_RATIOS]
 
     for ref in ref_images:
         if not Path(ref).is_file():
@@ -287,9 +311,12 @@ def main() -> int:
         "--skip-git-repo-check",
         "--dangerously-bypass-approvals-and-sandbox",
     ]
+    # NOTE: codex >=0.136 makes `-i/--image` variadic (`<FILE>...`), so a trailing
+    # prompt placed after `-i <ref>` gets swallowed as another image file and codex
+    # then reports "No prompt provided via stdin". Put the prompt BEFORE the refs.
+    cmd.append(full_prompt)
     for ref in ref_images:
         cmd += ["-i", ref]
-    cmd.append(full_prompt)
 
     short_prompt = args.prompt if len(args.prompt) <= 80 else args.prompt[:77] + "..."
     print(f"Prompt: {short_prompt}")

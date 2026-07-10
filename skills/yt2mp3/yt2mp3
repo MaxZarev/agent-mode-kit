@@ -12,6 +12,44 @@ OUTPUT_DIR="${2:-$HOME/Downloads/Audio from YouTube}"
 
 mkdir -p "$OUTPUT_DIR"
 
+# --- optional anti-bot-check setup -------------------------------------------
+# YouTube increasingly requires a PO token and/or cookies for many videos.
+# Both hooks below are optional: the script works without them until YouTube
+# starts answering "Sign in to confirm you're not a bot".
+#
+# 1. PO token generator (bgutil-ytdlp-pot-provider): clone the repo, then set
+#    YT2MP3_POT_SERVER_HOME to its server/ directory (or keep the default path).
+#    Repo + setup: https://github.com/Brainicism/bgutil-ytdlp-pot-provider
+POT_SERVER_HOME="${YT2MP3_POT_SERVER_HOME:-$HOME/.config/yt2mp3/bgutil-pot-provider/server}"
+
+# 2. Cookies of a DEDICATED throwaway Google account, exported once from a
+#    private browser session (never reopen that session in the browser after
+#    exporting — YouTube rotates the tokens and the file goes stale).
+#    Do NOT use your main Google account for this.
+COOKIES_FILE="${YT2MP3_COOKIES_FILE:-$HOME/.config/yt2mp3/cookies.txt}"
+
+EXTRA_ARGS=()
+if [[ -d "$POT_SERVER_HOME" ]]; then
+    EXTRA_ARGS+=(--extractor-args "youtubepot-bgutilscript:server_home=$POT_SERVER_HOME")
+fi
+if [[ -f "$COOKIES_FILE" ]]; then
+    EXTRA_ARGS+=(--cookies "$COOKIES_FILE")
+fi
+
+# --- weekly self-update of yt-dlp (YouTube changes defenses often) -----------
+STAMP="$HOME/.config/yt2mp3/.last-update"
+mkdir -p "$(dirname "$STAMP")"
+if [[ ! -f "$STAMP" || -n $(find "$STAMP" -mtime +7 2>/dev/null) ]]; then
+    echo "Updating yt-dlp (weekly check)..."
+    if command -v brew >/dev/null 2>&1; then
+        brew upgrade yt-dlp 2>/dev/null || true
+    else
+        yt-dlp -U 2>/dev/null || true
+    fi
+    touch "$STAMP"
+fi
+# ------------------------------------------------------------------------------
+
 echo "Downloading and converting to MP3..."
 
 yt-dlp \
@@ -19,6 +57,7 @@ yt-dlp \
     --audio-format mp3 \
     --audio-quality 0 \
     --concurrent-fragments 4 \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
     --output "$OUTPUT_DIR/%(title)s.%(ext)s" \
     "$URL"
 

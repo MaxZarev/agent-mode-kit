@@ -74,6 +74,7 @@ Approximate cost / latency tiers (per OpenAI's `gpt-image-2` rates, 16:9):
 - Codex saves the raw output under `$CODEX_HOME/generated_images/<session>/ig_*.png`; the script copies the freshest file (newer than the run's start time) to the requested output path.
 - If the requested output extension differs from what Codex produced (almost always `.png`), the script converts via `sips` on macOS; otherwise it falls back to writing the original extension and prints a warning.
 - Hard timeout in the script is 300s. low/medium almost never hit it; high+complex prompts occasionally do — the script **auto-retries once by default** on timeout, rate-limit (HTTP 429), or empty-output. Tune with `--retries N` (default 1, max attempts = N+1) and `--retry-cooldown SECONDS` (default 10). Auth / bad-arg failures never retry — those need a human fix (e.g. `codex login`).
+- `--ref` is a real flag and works in any position (no `--` separator needed): `... output.webp 16:9 --quality medium --ref a.png b.jpg`. **Put the aspect ratio (and any other flag) BEFORE `--ref`** — `--ref` greedily consumes the paths that follow it, so `--ref a.png 16:9` would read `16:9` as a path (the script recovers a trailing aspect ratio, but don't rely on it). Multiple refs: list them space-separated after one `--ref`.
 
 ## Aspect ratios
 

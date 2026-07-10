@@ -29,6 +29,15 @@ Make sure it is executable: `chmod +x <path>/yt2mp3`.
 
 Default output: `~/Downloads/Audio from YouTube/`
 
+## If YouTube says "Sign in to confirm you're not a bot"
+
+YouTube increasingly blocks plain `yt-dlp` downloads. The script has two optional hooks (both off until you set them up):
+
+1. **PO token provider** — clone [bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider) and put its `server/` directory at `~/.config/yt2mp3/bgutil-pot-provider/server` (or point `YT2MP3_POT_SERVER_HOME` at it). Also install the matching yt-dlp plugin per that repo's README.
+2. **Cookies** — export cookies of a **dedicated throwaway Google account** (never your main one) from a private browser session into `~/.config/yt2mp3/cookies.txt` (or set `YT2MP3_COOKIES_FILE`). After exporting, don't reopen that browser session — YouTube rotates the tokens and the file goes stale.
+
+The script also self-updates `yt-dlp` once a week (YouTube changes its defenses often).
+
 ## Workflow
 
 ### 1. Get the URL
