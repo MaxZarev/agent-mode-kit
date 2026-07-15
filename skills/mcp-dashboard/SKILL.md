@@ -94,10 +94,14 @@ read nothing but the printed path. Report the same way as in Step 2.
 ## What the script actually edits (for your understanding, not for chat)
 
 - Global servers & claude.ai/plugin connectors: per-project
-  `disabledMcpServers` array in the project's entry of `~/.claude.json`
-  (same place the `/mcp` toggle writes).
+  `disabledMcpServers` array in the project's entry of `~/.claude.json` —
+  the field the `/mcp` toggle persists (not in the official docs, but verified
+  against live Claude Code behavior).
 - Repo `.mcp.json` servers: `enabledMcpjsonServers` / `disabledMcpjsonServers`
-  arrays in the project's entry.
+  arrays in the project's entry. The documented location for these is
+  `.claude/settings*.json` inside the project — the script *reads* those for
+  state (denylist wins) but never writes them; if a name is pinned there, the
+  script prints a WARNING and the user must edit that file instead.
 - Everything else in `~/.claude.json` is left untouched; writes are atomic and
   preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`).
 

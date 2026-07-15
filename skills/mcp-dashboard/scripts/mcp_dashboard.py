@@ -102,15 +102,21 @@ def load_project_settings(path):
 
 
 def mcpjson_state(name, entry, settings):
-    """State of a .mcp.json server: 'on' | 'off' | 'ask' (not yet approved)."""
+    """State of a .mcp.json server: 'on' | 'off' | 'ask' (not yet approved).
+
+    enabled/disabled lists may also be the string "all"; disabled wins over enabled.
+    """
     def get(key, default):
         if key in settings:
             return settings[key]
         return entry.get(key, default)
 
-    if name in get("disabledMcpjsonServers", []):
+    def has(value, name):
+        return value == "all" or (isinstance(value, list) and name in value)
+
+    if has(get("disabledMcpjsonServers", []), name):
         return "off"
-    if name in get("enabledMcpjsonServers", []) or get("enableAllProjectMcpServers", False):
+    if has(get("enabledMcpjsonServers", []), name) or get("enableAllProjectMcpServers", False):
         return "on"
     return "ask"
 
@@ -238,7 +244,7 @@ def cmd_apply(args):
     raw_projects = config.get("projects") or {}
     _, mcpjson_names = collect(include_missing=True)
 
-    log = []
+    log, warnings = [], []
     for change in changes:
         path = change["project"]
         entry = raw_projects.get(path)
@@ -249,6 +255,14 @@ def cmd_apply(args):
         for action in ("enable", "disable"):
             for name in change[action]:
                 if name in in_mcpjson:
+                    pinned = load_project_settings(path)
+                    for key in ("enabledMcpjsonServers", "disabledMcpjsonServers"):
+                        v = pinned.get(key)
+                        if v == "all" or (isinstance(v, list) and name in v):
+                            warnings.append(
+                                "%r is pinned in %s/.claude/settings*.json (%s) — that "
+                                "file wins over this change; edit it if the toggle "
+                                "doesn't take effect." % (name, home_short(path), key))
                     en = entry.setdefault("enabledMcpjsonServers", [])
                     dis = entry.setdefault("disabledMcpjsonServers", [])
                     (dis if action == "enable" else en)[:] = \
@@ -280,6 +294,8 @@ def cmd_apply(args):
 
     print("Applied %d change(s):" % len(log))
     print("\n".join("  " + l for l in log))
+    for w in warnings:
+        print("WARNING: " + w)
     print("Backup: %s" % backup)
     print("NOTE: changes take effect in NEW Claude Code sessions; other sessions "
           "running right now may overwrite them — re-run `build` to verify.")
