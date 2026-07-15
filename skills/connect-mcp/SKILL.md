@@ -61,6 +61,11 @@ If the user only says a product name ("connect my Notion") and you don't know
 the URL, ask them for the MCP link from that product's docs / integrations page,
 or search for the official one — don't guess an endpoint.
 
+While you're at it, check whether the service also offers a **static API
+token** (a key from its dashboard) as an alternative to OAuth. If it does,
+prefer that path (Step 4c): it has far fewer moving parts — no browser
+sign-in, no terminal tricks — which especially matters on Windows.
+
 > Some setups route **local stdio** servers through a central MCP hub/registry
 > instead of adding them directly. If the project has such a convention, follow
 > it for stdio servers. Hosted **HTTP/SSE** connectors are added directly, as
@@ -123,12 +128,17 @@ No authentication needed. Go to Step 5.
 
 This server uses OAuth: the user signs in through their browser and approves
 access. The catch: the built-in `claude mcp login` refuses to run without a real
-terminal, which you don't have. Use the bundled helper, which opens a hidden
-terminal for it so the browser flow works unattended.
+terminal, which you don't have. Use the bundled helper, which gets it a real
+terminal so the browser flow works unattended.
 
 1. Tell the user first, plainly:
    > "A browser tab will open so you can sign in to <service> and allow access.
    > After you approve, it finishes automatically — nothing to paste here."
+
+   On **Windows** add one more sentence: "A small black console window will
+   also appear — that's part of the sign-in, don't close it; it goes away by
+   itself." A surprise console window looks like a virus to a non-technical
+   user.
 
 2. Run the helper **in the background** (it blocks until the user finishes in the
    browser):
@@ -138,20 +148,35 @@ terminal for it so the browser flow works unattended.
    Use `python3` on macOS/Linux and `python` on Windows if `python3` is missing.
 
 3. Poll the helper's output file for these markers:
+   - `CLI_VERSION: <v>` — preflight info; nothing to do, but useful in reports.
+   - `CLI_TOO_OLD` — the installed Claude Code CLI has no `mcp login` command
+     (old versions didn't; the raw failure is a cryptic `unknown command
+     'login'`). **Update the CLI yourself and re-run the helper**: native
+     install → `claude update`; npm install → `npm i -g
+     @anthropic-ai/claude-code@latest`. Tell the user in plain words ("your
+     Claude Code needed a quick update — done, continuing").
    - `AUTH_URL: <url>` — the sign-in link. **Immediately relay it to the user**
      as a clickable fallback: "If the tab didn't open, click here: <url>". This
-     matters — on some machines the auto-open silently fails and a non-technical
-     user is otherwise stuck.
+     matters — on some machines (Windows especially) the auto-open silently
+     fails and a non-technical user is otherwise stuck.
    - `LOGIN_OK` — success. Continue to Step 5.
    - `LOGIN_TIMEOUT` — they ran out of time; offer to run it again.
-   - `NO_PTY` (Windows only) — the environment can't open a hidden terminal; the
-     helper prints one short line for the user to run in their own terminal.
-     Relay exactly that line and stay with them through it.
+   - `NO_PTY` (Windows only) — the helper couldn't open a console window and has
+     no fallback left; it prints one short line for the user to run in their own
+     terminal. Relay exactly that line and stay with them through it.
+
+   The real sign of success is `✔ Connected` in `claude mcp list` — the helper
+   checks that itself on Windows (the login window may still say "Waiting…"
+   after the connection is already live). If the helper dies without a clear
+   marker, run `claude mcp list` before declaring failure.
 
 Why the helper instead of `claude mcp login` directly: without a real terminal
-the plain command dies with "stdin isn't a terminal". The helper allocates a
-pseudo-terminal (Python's `pty` on macOS/Linux, `winpty` on Windows) so the same
-official flow runs — it does not replace or fake any part of the OAuth.
+the plain command dies with "stdin isn't a terminal". The helper gets it one —
+a pseudo-terminal via Python's `pty` on macOS/Linux; on Windows it launches the
+login in a **new console window** through a temporary `.bat` file, with the
+output redirected to a file it watches (`winpty` is only a fallback — it needs
+a console itself, so it can't help from a consoleless agent shell). Either way
+the same official flow runs — nothing about the OAuth is replaced or faked.
 
 ### 4c. Needs a static API key / token → collect it privately
 
@@ -232,10 +257,18 @@ and never shown back. Then feed it into the config *without printing it*.
 
 - **macOS / Linux:** everything runs directly; `mcp_login.py` uses the built-in
   `pty` module (no install).
-- **Windows:** `mcp_login.py` uses `winpty`, which ships with Git for Windows
-  (the environment Claude Code uses there), so OAuth normally still works with no
-  terminal. If `winpty` is missing it prints `NO_PTY` and the one command for the
-  user to run in a normal terminal — relay that verbatim.
+- **Windows:** `mcp_login.py` opens the OAuth sign-in in a **new console
+  window** (via a temp `.bat`, output captured to a file) — that's the path
+  that actually works from a consoleless agent shell. Expect these Windows
+  specifics:
+  - warn the user about the extra console window before it appears (Step 4b);
+  - an old CLI is the #1 real-world failure — the helper preflights it and
+    emits `CLI_TOO_OLD`; update (`claude update` / npm) and re-run;
+  - never build `cmd /c "…"` commands inline with quotes yourself — cmd's
+    quote-stripping silently breaks redirects (the helper already does it
+    right via the `.bat`);
+  - `winpty` (Git for Windows) is only a last-ditch fallback, not a
+    requirement.
 - `grep`/`cut` piping in Step 4c works in bash, including Git Bash on Windows.
 - If Node is missing when secret-input needs it, secret-input handles the
   offer-to-install / manual fallback itself.
@@ -253,5 +286,6 @@ and never shown back. Then feed it into the config *without printing it*.
 | Check status (server has a secret) | `claude mcp list`  — `get` would print the key |
 | List all | `claude mcp list` |
 | OAuth sign-in (no terminal) | `python3 <skill-dir>/scripts/mcp_login.py <name>` |
+| Update an outdated CLI | `claude update` (native) / `npm i -g @anthropic-ai/claude-code@latest` (npm) |
 | Sign out | `claude mcp logout <name>` |
 | Remove | `claude mcp remove <name> -s <user\|local>` |
