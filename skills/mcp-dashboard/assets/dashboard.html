@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP-дашборд</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --mut:#68707f; --line:#e3e6eb;
+    --on:#177a3d; --on-bg:#e5f4ea; --off:#b3261e; --off-bg:#fbeae9;
+    --ask:#8a6d00; --ask-bg:#fdf3d7; --na:#c3c8d1;
+    --accent:#2653d4; --chg:#2653d4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:20px 24px 12px}
+  h1{margin:0 0 4px;font-size:20px}
+  .sub{color:var(--mut);font-size:13px;max-width:70ch}
+  .toolbar{display:flex;gap:10px;align-items:center;padding:10px 24px;flex-wrap:wrap}
+  .toolbar input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;width:260px;background:var(--card)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--mut);font-size:12.5px;margin-left:auto}
+  .legend b{font-weight:600}
+  .wrap{margin:8px 24px 90px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:calc(100vh - 250px)}
+  table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
+  th,td{border-bottom:1px solid var(--line);padding:0;text-align:center}
+  thead th{position:sticky;top:0;background:var(--card);z-index:3;padding:10px 8px;font-size:12px;
+    color:var(--mut);font-weight:600;min-width:96px;max-width:150px;overflow-wrap:anywhere;vertical-align:bottom}
+  thead th:first-child,tbody td:first-child{position:sticky;left:0;background:var(--card);z-index:2;text-align:left}
+  thead th:first-child{z-index:4}
+  td:first-child{padding:8px 14px;min-width:260px;max-width:340px;border-right:1px solid var(--line)}
+  .srv{font-weight:600;font-size:13.5px;overflow-wrap:anywhere}
+  .det{color:var(--mut);font-size:11.5px;overflow-wrap:anywhere}
+  .badge{display:inline-block;font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px;background:#eef1f5;color:var(--mut)}
+  tr.group td{background:#eef1f5;color:var(--mut);font-weight:700;font-size:12px;letter-spacing:.03em;
+    text-transform:uppercase;padding:7px 14px;text-align:left;position:sticky;left:0}
+  .cell{display:flex;align-items:center;justify-content:center;min-height:40px;font-weight:700;font-size:13px;user-select:none}
+  .cell.t{cursor:pointer}
+  .cell.t:hover{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
+  .on{color:var(--on);background:var(--on-bg)}
+  .off{color:var(--off);background:var(--off-bg)}
+  .ask{color:var(--ask);background:var(--ask-bg)}
+  .na{color:var(--na)}
+  td.chg .cell{box-shadow:inset 0 0 0 2px var(--chg);border-radius:8px}
+  footer{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+    padding:12px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  button{font:inherit;font-weight:600;border-radius:9px;padding:9px 16px;cursor:pointer;border:1px solid var(--line);background:var(--card)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button:disabled{opacity:.45;cursor:default}
+  #count{color:var(--mut);font-size:13px}
+  #okmsg{color:var(--on);font-size:13px;font-weight:600}
+  #out{position:absolute;left:-9999px;top:0}
+</style>
+</head>
+<body>
+<header>
+  <h1>MCP-дашборд</h1>
+  <div class="sub">Какие MCP-серверы есть и в каких проектах включены. Страница <b>сама ничего
+  не меняет</b>: щёлкай по ячейкам ✓/✕, затем нажми «Скопировать изменения» и вставь блок
+  в чат агенту — он всё применит. Секретов на странице нет: значения ключей скрыты.</div>
+</header>
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Фильтр по серверу или проекту…" oninput="render()">
+  <div class="legend">
+    <span><b style="color:var(--on)">✓</b> включён</span>
+    <span><b style="color:var(--off)">✕</b> выключен</span>
+    <span><b style="color:var(--ask)">?</b> ждёт одобрения (.mcp.json)</span>
+    <span><b style="color:var(--na)">—</b> не подключён к проекту</span>
+    <span><b style="color:var(--chg)">рамка</b> — твоё изменение</span>
+  </div>
+</div>
+<div class="wrap"><table id="tbl"></table></div>
+<footer>
+  <button class="primary" id="copyBtn" onclick="copyResult()" disabled>📋 Скопировать изменения</button>
+  <button onclick="resetAll()">Сбросить</button>
+  <span id="count"></span>
+  <span id="okmsg"></span>
+  <textarea id="out" readonly></textarea>
+</footer>
+
+<script>
+const DATA = /*__MCP_DATA__*/null;
+const GROUPS = [
+  ["global",  "Глобальные серверы (user scope — доступны во всех проектах)"],
+  ["dynamic", "Коннекторы claude.ai и плагины (управляются снаружи, здесь можно только вкл/выкл)"],
+  ["local",   "Локальные серверы (подключены к одному проекту)"],
+  ["mcpjson", "Проектные серверы (.mcp.json в репозитории)"],
+];
+const SYM = {on:"✓", off:"✕", ask:"?", na:"—"};
+const changed = {};           // JSON.stringify([server,path]) -> desired "on"|"off"
+
+const key = (s,p) => JSON.stringify([s,p]);
+const state = (s,p) => changed[key(s,p)] || DATA.states[s][p];
+
+function toggle(s,p){
+  const orig = DATA.states[s][p];
+  const next = state(s,p) === "on" ? "off" : "on";
+  if (next === orig) delete changed[key(s,p)];
+  else changed[key(s,p)] = next;
+  render();
+}
+
+function esc(t){return String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+
+function render(){
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const shown = q && DATA.projects.some(p=>p.path.toLowerCase().includes(q))
+    ? DATA.projects.filter(p=>p.path.toLowerCase().includes(q)) : DATA.projects;
+  let html = "<thead><tr><th>Сервер</th>" + shown.map(p =>
+    `<th title="${esc(p.path)}">${esc(p.name)}</th>`).join("") + "</tr></thead><tbody>";
+  for (const [gid, glabel] of GROUPS){
+    const rows = DATA.servers.filter(s => s.group === gid &&
+      (!q || s.name.toLowerCase().includes(q) || DATA.projects.some(p=>p.path.toLowerCase().includes(q))));
+    if (!rows.length) continue;
+    html += `<tr class="group"><td colspan="${shown.length+1}">${glabel}</td></tr>`;
+    for (const s of rows){
+      const env = s.envKeys.length ? ` · env: ${s.envKeys.join(", ")}` : "";
+      html += `<tr><td><div class="srv">${esc(s.name)}` +
+        (s.transport ? `<span class="badge">${esc(s.transport)}</span>` : "") +
+        `</div><div class="det">${esc(s.detail)}${esc(env)}</div></td>`;
+      for (const p of shown){
+        const st = state(s.name, p.path);
+        const tgl = st !== "na";
+        const chg = changed[key(s.name,p.path)] ? " chg" : "";
+        html += `<td class="${chg}"><div class="cell ${st}${tgl?" t":""}"` +
+          (tgl ? ` onclick="toggle(${JSON.stringify(s.name).replace(/"/g,"&quot;")},${JSON.stringify(p.path).replace(/"/g,"&quot;")})"` : "") +
+          `>${SYM[st]}</div></td>`;
+      }
+      html += "</tr>";
+    }
+  }
+  document.getElementById("tbl").innerHTML = html + "</tbody>";
+  const n = Object.keys(changed).length;
+  document.getElementById("count").textContent =
+    n ? `изменений: ${n}` : `серверов: ${DATA.servers.length} · проектов: ${DATA.projects.length} · снимок: ${DATA.generatedAt}`;
+  document.getElementById("copyBtn").disabled = !n;
+}
+
+function resetAll(){ for (const k in changed) delete changed[k]; render(); }
+
+function buildResult(){
+  const byProject = {};
+  for (const k in changed){
+    const [s, p] = JSON.parse(k);
+    (byProject[p] = byProject[p] || {enable:[], disable:[]})[changed[k] === "on" ? "enable" : "disable"].push(s);
+  }
+  let out = "=== MCP CHANGES ===\n";
+  for (const p of Object.keys(byProject).sort()){
+    out += "project: " + p + "\n";
+    if (byProject[p].enable.length)  out += "enable: "  + byProject[p].enable.sort().join(", ") + "\n";
+    if (byProject[p].disable.length) out += "disable: " + byProject[p].disable.sort().join(", ") + "\n";
+  }
+  return out + "=== END ===";
+}
+
+async function copyResult(){
+  const txt = buildResult(), ta = document.getElementById("out"), ok = document.getElementById("okmsg");
+  ta.value = txt;
+  try{ await navigator.clipboard.writeText(txt); ok.textContent = "✅ Скопировано — вставь в чат агенту"; }
+  catch(e){ ta.style.position="static"; ta.focus(); ta.select();
+    try{ document.execCommand("copy"); ok.textContent = "✅ Скопировано — вставь в чат агенту"; }
+    catch(e2){ ok.textContent = "⚠️ Выдели текст в поле и скопируй вручную"; } }
+  setTimeout(()=>ok.textContent="", 6000);
+}
+
+render();
+</script>
+</body>
+</html>
