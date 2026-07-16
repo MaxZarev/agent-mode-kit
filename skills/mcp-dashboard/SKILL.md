@@ -34,7 +34,16 @@ existing servers on/off per project.
 python3 <skill-dir>/scripts/mcp_dashboard.py build --out <tmp>
 ```
 
-It prints the absolute path of `mcp-dashboard.html`. Open it for the user:
+It prints the absolute path of `mcp-dashboard.html`, possibly followed by:
+
+- `FIRST RUN: …` — a baseline of the user's projects was just saved. Tell the
+  user they can hide unneeded projects right on the page (the ✕ in a column
+  header) and those won't show up next time.
+- `NEW PROJECT: <path>` lines — projects that appeared since the last run.
+  **Mention them to the user** ("с прошлого раза появились новые проекты: …");
+  on the page they carry a «новый» badge.
+
+Open the page for the user:
 
 - macOS: `open "<path>"`
 - Windows: `start "" "<path>"`
@@ -57,11 +66,17 @@ When the user pastes a block like:
 
 ```
 === MCP CHANGES ===
+hide: /Users/x/old-experiment
+show: /Users/x/comeback
 project: /Users/x/proj
 enable: context7
 disable: notion, claude.ai Gmail
 === END ===
 ```
+
+`hide:` / `show:` lines (one path each) only control which projects the
+dashboard displays — they go to the skill's own state file, never to
+`~/.claude.json`, and don't affect any MCP server.
 
 1. Save it **verbatim** to `<tmp>/mcp-changes.txt` (Write tool — avoids shell
    quoting issues; server names may contain spaces).
@@ -103,7 +118,12 @@ read nothing but the printed path. Report the same way as in Step 2.
   state (denylist wins) but never writes them; if a name is pinned there, the
   script prints a WARNING and the user must edit that file instead.
 - Everything else in `~/.claude.json` is left untouched; writes are atomic and
-  preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`).
+  preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`). The backup
+  is skipped when the block contains only `hide:`/`show:` lines (config not touched).
+- The skill's own state — hidden projects + known projects (for new-project
+  detection) — lives in `~/.claude/mcp-dashboard.json` (or under
+  `CLAUDE_CONFIG_DIR`). Deleting that file resets visibility to "show all"
+  and re-baselines what counts as "new".
 
 Caveat to keep in mind: other Claude Code sessions running *right now* may
 rewrite `~/.claude.json` and lose the applied change — if the user reports a

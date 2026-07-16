@@ -49,6 +49,17 @@
   #count{color:var(--mut);font-size:13px}
   #okmsg{color:var(--on);font-size:13px;font-weight:600}
   #out{position:absolute;left:-9999px;top:0}
+  .newb{display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px;
+    background:var(--accent);color:#fff;margin-right:4px;vertical-align:1px}
+  .hidebtn{display:inline-block;margin-left:6px;padding:0 5px;border-radius:5px;cursor:pointer;
+    color:var(--mut);font-weight:700}
+  .hidebtn:hover{background:var(--off-bg);color:var(--off)}
+  .hpanel{margin:0 24px 8px;font-size:13px;color:var(--mut)}
+  .hpanel summary{cursor:pointer;font-weight:600}
+  .hpanel .hitem{display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0;
+    background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 10px}
+  .hpanel .hitem.pend{outline:2px solid var(--chg)}
+  .hpanel button{padding:2px 8px;font-size:12px}
 </style>
 </head>
 <body>
@@ -56,7 +67,9 @@
   <h1>MCP-дашборд</h1>
   <div class="sub">Какие MCP-серверы есть и в каких проектах включены. Страница <b>сама ничего
   не меняет</b>: щёлкай по ячейкам ✓/✕, затем нажми «Скопировать изменения» и вставь блок
-  в чат агенту — он всё применит. Секретов на странице нет: значения ключей скрыты.</div>
+  в чат агенту — он всё применит. Секретов на странице нет: значения ключей скрыты.
+  Ненужные проекты скрывай крестиком в шапке колонки — это тоже уедет в блок изменений,
+  и в следующий раз они не покажутся.</div>
 </header>
 <div class="toolbar">
   <input id="q" type="search" placeholder="Фильтр по серверу или проекту…" oninput="render()">
@@ -68,6 +81,7 @@
     <span><b style="color:var(--chg)">рамка</b> — твоё изменение</span>
   </div>
 </div>
+<details class="hpanel" id="hp"></details>
 <div class="wrap"><table id="tbl"></table></div>
 <footer>
   <button class="primary" id="copyBtn" onclick="copyResult()" disabled>📋 Скопировать изменения</button>
@@ -91,6 +105,16 @@ const changed = {};           // JSON.stringify([server,path]) -> desired "on"|"
 const key = (s,p) => JSON.stringify([s,p]);
 const state = (s,p) => changed[key(s,p)] || DATA.states[s][p];
 
+const vis = {};               // path -> pending hidden(true)/shown(false)
+const isHidden = p => vis[p.path] !== undefined ? vis[p.path] : !!p.hidden;
+
+function toggleVis(path){
+  const p = DATA.projects.find(x => x.path === path);
+  const next = !isHidden(p);
+  if (next === !!p.hidden) delete vis[path]; else vis[path] = next;
+  render();
+}
+
 function toggle(s,p){
   const orig = DATA.states[s][p];
   const next = state(s,p) === "on" ? "off" : "on";
@@ -103,10 +127,14 @@ function esc(t){return String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;","
 
 function render(){
   const q = document.getElementById("q").value.trim().toLowerCase();
-  const shown = q && DATA.projects.some(p=>p.path.toLowerCase().includes(q))
-    ? DATA.projects.filter(p=>p.path.toLowerCase().includes(q)) : DATA.projects;
+  const visible = DATA.projects.filter(p => !isHidden(p));
+  const shown = q && visible.some(p=>p.path.toLowerCase().includes(q))
+    ? visible.filter(p=>p.path.toLowerCase().includes(q)) : visible;
   let html = "<thead><tr><th>Сервер</th>" + shown.map(p =>
-    `<th title="${esc(p.path)}">${esc(p.name)}</th>`).join("") + "</tr></thead><tbody>";
+    `<th title="${esc(p.path)}">` + (p.new ? `<span class="newb">новый</span>` : "") +
+    `${esc(p.name)}<span class="hidebtn" title="Скрыть проект из дашборда" ` +
+    `onclick="toggleVis(${JSON.stringify(p.path).replace(/"/g,"&quot;")})">✕</span></th>`
+  ).join("") + "</tr></thead><tbody>";
   for (const [gid, glabel] of GROUPS){
     const rows = DATA.servers.filter(s => s.group === gid &&
       (!q || s.name.toLowerCase().includes(q) || DATA.projects.some(p=>p.path.toLowerCase().includes(q))));
@@ -129,13 +157,29 @@ function render(){
     }
   }
   document.getElementById("tbl").innerHTML = html + "</tbody>";
-  const n = Object.keys(changed).length;
+
+  const hiddenList = DATA.projects.filter(p => isHidden(p));
+  const hp = document.getElementById("hp");
+  if (hiddenList.length){
+    hp.style.display = "";
+    hp.innerHTML = `<summary>Скрытые проекты (${hiddenList.length})</summary>` +
+      hiddenList.map(p => `<span class="hitem${vis[p.path] !== undefined ? " pend" : ""}">` +
+        `<span title="${esc(p.path)}">${esc(p.name)}</span>` +
+        `<button onclick="toggleVis(${JSON.stringify(p.path).replace(/"/g,"&quot;")})">вернуть</button></span>`
+      ).join("");
+  } else { hp.style.display = "none"; hp.innerHTML = ""; }
+
+  const n = Object.keys(changed).length + Object.keys(vis).length;
   document.getElementById("count").textContent =
-    n ? `изменений: ${n}` : `серверов: ${DATA.servers.length} · проектов: ${DATA.projects.length} · снимок: ${DATA.generatedAt}`;
+    n ? `изменений: ${n}` : `серверов: ${DATA.servers.length} · проектов: ${visible.length}${hiddenList.length ? ` (+${hiddenList.length} скрыто)` : ""} · снимок: ${DATA.generatedAt}`;
   document.getElementById("copyBtn").disabled = !n;
 }
 
-function resetAll(){ for (const k in changed) delete changed[k]; render(); }
+function resetAll(){
+  for (const k in changed) delete changed[k];
+  for (const k in vis) delete vis[k];
+  render();
+}
 
 function buildResult(){
   const byProject = {};
@@ -144,6 +188,7 @@ function buildResult(){
     (byProject[p] = byProject[p] || {enable:[], disable:[]})[changed[k] === "on" ? "enable" : "disable"].push(s);
   }
   let out = "=== MCP CHANGES ===\n";
+  for (const p of Object.keys(vis).sort()) out += (vis[p] ? "hide: " : "show: ") + p + "\n";
   for (const p of Object.keys(byProject).sort()){
     out += "project: " + p + "\n";
     if (byProject[p].enable.length)  out += "enable: "  + byProject[p].enable.sort().join(", ") + "\n";

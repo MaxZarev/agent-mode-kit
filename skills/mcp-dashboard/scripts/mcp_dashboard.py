@@ -23,6 +23,10 @@ import tempfile
 # CLAUDE_CONFIG_DIR relocates ~/.claude.json (same rule Claude Code itself uses)
 CLAUDE_JSON = os.path.join(
     os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~"), ".claude.json")
+# Skill's own persistent state: hidden projects + known projects (for "new" detection)
+STATE_FILE = os.path.join(
+    os.environ.get("CLAUDE_CONFIG_DIR")
+    or os.path.join(os.path.expanduser("~"), ".claude"), "mcp-dashboard.json")
 SECRETISH_FLAG = re.compile(r"(key|token|secret|pass|auth|bearer|credential)", re.I)
 SECRETISH_VALUE = re.compile(r"^[A-Za-z0-9_\-\.=+/]{20,}$")
 MASK = "•••"  # •••
@@ -36,6 +40,18 @@ def read_json(path):
             return json.load(f)
     except (OSError, ValueError):
         return None
+
+
+def load_state():
+    return read_json(STATE_FILE) or {}
+
+
+def save_state(state):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATE_FILE), prefix=".mcp-dashboard.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, STATE_FILE)
 
 
 def home_short(path):
@@ -190,6 +206,19 @@ def collect(include_missing=False):
 
 def cmd_build(args):
     data, _ = collect(include_missing=args.include_missing)
+    state = load_state()
+    first_run = "knownProjects" not in state
+    known = set(state.get("knownProjects") or [])
+    hidden = set(state.get("hiddenProjects") or [])
+    paths = [p["path"] for p in data["projects"]]
+    new = [] if first_run else [p for p in paths if p not in known]
+    for p in data["projects"]:
+        p["hidden"] = p["path"] in hidden
+        p["new"] = p["path"] in new
+    state["knownProjects"] = sorted(known | set(paths))
+    state["hiddenProjects"] = sorted(hidden)
+    save_state(state)
+
     template = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "assets", "dashboard.html")
     with open(template, "r", encoding="utf-8") as f:
@@ -202,6 +231,12 @@ def cmd_build(args):
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
     print(os.path.abspath(out))
+    if first_run:
+        print("FIRST RUN: baseline of %d projects saved — hide the unneeded ones "
+              "on the page (the ✕ in a column header), they won't come back."
+              % len(paths))
+    for p in new:
+        print("NEW PROJECT: %s" % p)
 
 
 # ---------------------------------------------------------------- apply
@@ -210,12 +245,18 @@ def parse_changes(text):
     """Parse the block the dashboard's Copy button produces.
 
     === MCP CHANGES ===
+    hide: /abs/other-path
+    show: /abs/third-path
     project: /abs/path
     enable: a, b
     disable: c
     === END ===
+
+    hide/show are project-VISIBILITY lines (one path each, position-independent);
+    they go to the skill's state file, not to ~/.claude.json.
     """
     changes, current = [], None
+    visibility = {"hide": [], "show": []}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("==="):
@@ -227,22 +268,37 @@ def parse_changes(text):
             changes.append(current)
         elif key in ("enable", "disable") and current is not None:
             current[key] += [n.strip() for n in value.split(",") if n.strip()]
+        elif key in ("hide", "show") and value:
+            visibility[key].append(value)
         else:
             sys.exit("ERROR: unrecognized line in changes block: %r" % line)
-    return [c for c in changes if c["enable"] or c["disable"]]
+    return [c for c in changes if c["enable"] or c["disable"]], visibility
 
 
 def cmd_apply(args):
     with open(args.changes_file, "r", encoding="utf-8") as f:
-        changes = parse_changes(f.read())
-    if not changes:
-        sys.exit("Nothing to apply: the block contains no enable/disable lines.")
+        changes, visibility = parse_changes(f.read())
+    if not changes and not visibility["hide"] and not visibility["show"]:
+        sys.exit("Nothing to apply: the block contains no enable/disable/hide/show lines.")
 
     config = read_json(CLAUDE_JSON)
     if config is None:
         sys.exit("ERROR: cannot read %s" % CLAUDE_JSON)
     raw_projects = config.get("projects") or {}
     _, mcpjson_names = collect(include_missing=True)
+
+    state = load_state()
+    hidden = set(state.get("hiddenProjects") or [])
+    vis_log = []
+    for path in visibility["hide"]:
+        if path not in raw_projects:
+            sys.exit("ERROR: project %r (hide:) not found in ~/.claude.json — "
+                     "re-run `build` and copy a fresh block." % path)
+        hidden.add(path)
+        vis_log.append("hide %s (dashboard only)" % home_short(path))
+    for path in visibility["show"]:
+        hidden.discard(path)
+        vis_log.append("show %s (dashboard only)" % home_short(path))
 
     log, warnings = [], []
     for change in changes:
@@ -280,25 +336,30 @@ def cmd_apply(args):
 
     if args.dry_run:
         print("DRY RUN — nothing written. Would apply:")
-        print("\n".join("  " + l for l in log))
+        print("\n".join("  " + l for l in log + vis_log))
         return
 
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = CLAUDE_JSON + ".bak-mcpdash-" + stamp
-    shutil.copy2(CLAUDE_JSON, backup)
+    backup = None
+    if log:  # ~/.claude.json is touched only for real server changes
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = CLAUDE_JSON + ".bak-mcpdash-" + stamp
+        shutil.copy2(CLAUDE_JSON, backup)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CLAUDE_JSON), prefix=".claude.json.")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CLAUDE_JSON)
+    if vis_log:
+        state["hiddenProjects"] = sorted(hidden)
+        save_state(state)
 
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CLAUDE_JSON), prefix=".claude.json.")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CLAUDE_JSON)
-
-    print("Applied %d change(s):" % len(log))
-    print("\n".join("  " + l for l in log))
+    print("Applied %d change(s):" % len(log + vis_log))
+    print("\n".join("  " + l for l in log + vis_log))
     for w in warnings:
         print("WARNING: " + w)
-    print("Backup: %s" % backup)
-    print("NOTE: changes take effect in NEW Claude Code sessions; other sessions "
-          "running right now may overwrite them — re-run `build` to verify.")
+    if backup:
+        print("Backup: %s" % backup)
+        print("NOTE: changes take effect in NEW Claude Code sessions; other sessions "
+              "running right now may overwrite them — re-run `build` to verify.")
 
 
 # ---------------------------------------------------------------- main
