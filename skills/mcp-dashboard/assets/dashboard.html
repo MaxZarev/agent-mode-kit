@@ -6,89 +6,180 @@
 <title>MCP-дашборд</title>
 <style>
   :root{
-    --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --mut:#68707f; --line:#e3e6eb;
-    --on:#177a3d; --on-bg:#e5f4ea; --off:#b3261e; --off-bg:#fbeae9;
-    --ask:#8a6d00; --ask-bg:#fdf3d7; --na:#c3c8d1;
-    --accent:#2653d4; --chg:#2653d4;
+    --bg:#eef1f6; --card:#fff; --ink:#1d2634; --mut:#66718a; --line:#e3e8f0; --gline:#d3dae6;
+    --ghead:#e9edf4; --rowh:#f3f6fb;
+    --on:#0e7a3b; --on-bg:#e1f4e8; --on-ln:#b8e2c8;
+    --off:#b3261e; --off-bg:#fdeae8; --off-ln:#f3c6c1;
+    --ask:#8a6a00; --ask-bg:#fdf3d2; --ask-ln:#eeda8e;
+    --mix:#4a5a80; --mix-bg:#e7ebf4; --mix-ln:#ccd6e8;
+    --na:#c2c9d6; --blk:#8b94a4; --blk-bg:#edf0f5; --blk-ln:#dfe4ec;
+    --accent:#2749c9; --chg:#2749c9;
+    --sans:-apple-system,"SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Cascadia Mono",monospace;
   }
   *{box-sizing:border-box}
-  body{margin:0;font:14px/1.45 -apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
-  header{padding:20px 24px 12px}
-  h1{margin:0 0 4px;font-size:20px}
-  .sub{color:var(--mut);font-size:13px;max-width:70ch}
-  .toolbar{display:flex;gap:10px;align-items:center;padding:10px 24px;flex-wrap:wrap}
-  .toolbar input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;width:260px;background:var(--card)}
-  .legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--mut);font-size:12.5px;margin-left:auto}
-  .legend b{font-weight:600}
-  .wrap{margin:8px 24px 90px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:auto;max-height:calc(100vh - 250px)}
+  html,body{height:100%}
+  body{margin:0;font:15px/1.5 var(--sans);background:var(--bg);color:var(--ink);
+    display:flex;flex-direction:column}
+  header,.toolbar,.hpanel{flex:none}
+  header{padding:22px 24px 10px}
+  h1{margin:0 0 8px;font-size:22px;font-weight:700;letter-spacing:-.01em}
+  h1 .mark{font-family:var(--mono);font-size:17px;background:var(--ink);color:#fff;
+    border-radius:8px;padding:3px 9px 4px;letter-spacing:.05em;vertical-align:2px;margin-right:2px}
+  .sub{color:var(--mut);font-size:14px}
+  .sub summary{cursor:pointer;font-weight:600;font-size:14.5px;width:max-content;border-radius:6px;padding:1px 4px}
+  .sub summary:hover{color:var(--ink)}
+  .sub .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:10px;margin-top:12px}
+  .sub .cards p{margin:0;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:12px 16px;line-height:1.6}
+  .sub .cards b{color:var(--ink)}
+  .sub .ic{margin-right:8px}
+  .toolbar{display:flex;gap:12px;align-items:center;padding:10px 24px;flex-wrap:wrap}
+  .toolbar input{padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:14px/1.4 var(--sans);
+    width:270px;background:var(--card)}
+  .toolbar input::placeholder{color:var(--na)}
+  .mode{display:flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
+  .mode button{border:0;border-radius:8px;padding:6px 14px;font-size:13.5px;font-weight:600;
+    color:var(--mut);background:transparent}
+  .mode button:hover{color:var(--ink)}
+  .mode button.active{background:var(--accent);color:#fff}
+  .legend{display:flex;gap:5px 16px;flex-wrap:wrap;align-items:center;color:var(--mut);font-size:13px;margin-left:auto}
+  .legend .pip{margin-right:4px}
+  .wrap{margin:8px 24px 16px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:auto;
+    flex:0 1 auto;min-height:120px;box-shadow:0 1px 3px rgba(29,38,52,.05)}
   table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
   th,td{border-bottom:1px solid var(--line);padding:0;text-align:center}
-  thead th{position:sticky;top:0;background:var(--card);z-index:3;padding:10px 8px;font-size:12px;
-    color:var(--mut);font-weight:600;min-width:96px;max-width:150px;overflow-wrap:anywhere;vertical-align:bottom}
-  thead th:first-child,tbody td:first-child{position:sticky;left:0;background:var(--card);z-index:2;text-align:left}
-  thead th:first-child{z-index:4}
-  td:first-child{padding:8px 14px;min-width:260px;max-width:340px;border-right:1px solid var(--line)}
-  .srv{font-weight:600;font-size:13.5px;overflow-wrap:anywhere}
-  .det{color:var(--mut);font-size:11.5px;overflow-wrap:anywhere}
-  .badge{display:inline-block;font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px;background:#eef1f5;color:var(--mut)}
-  tr.group td{background:#eef1f5;color:var(--mut);font-weight:700;font-size:12px;letter-spacing:.03em;
-    text-transform:uppercase;padding:7px 14px;text-align:left;position:sticky;left:0}
-  .cell{display:flex;align-items:center;justify-content:center;min-height:40px;font-weight:700;font-size:13px;user-select:none}
+  tr.gh th{position:sticky;top:0;z-index:4;height:36px;background:var(--ghead);color:#57637a;
+    font:700 11px/1.3 var(--mono);letter-spacing:.07em;text-transform:uppercase;
+    padding:0 12px;white-space:nowrap;text-align:left;cursor:default}
+  tr.gh th .gl{display:inline-block;position:sticky;left:312px}
+  tr.sh th{position:sticky;top:36px;z-index:3;background:var(--card);vertical-align:bottom;
+    min-width:96px;max-width:150px;padding:12px 8px 9px;cursor:default}
+  th.corner{position:sticky;top:0;left:0;z-index:6;background:var(--card);text-align:left;
+    vertical-align:bottom;padding:10px 14px;font-size:12.5px;font-weight:600;color:var(--mut);
+    border-right:1px solid var(--line)}
+  th.corner,td.pcell{width:300px;min-width:300px;max-width:300px}
+  .svn{display:block;font:600 12.5px/1.35 var(--mono);color:var(--ink);overflow-wrap:anywhere}
+  .svn.mut{color:var(--mut);font-size:11.5px}
+  .tp{display:block;margin-top:4px;font:600 9.5px/1 var(--mono);color:var(--mut);text-transform:uppercase}
+  .gs{border-left:2px solid var(--gline)}
+  td.pcell{position:sticky;left:0;background:var(--card);z-index:2;text-align:left;
+    padding:8px 14px;border-right:1px solid var(--line)}
+  .pname{font:600 13.5px/1.35 var(--mono);overflow-wrap:anywhere}
+  tbody tr:not(.allrow):hover td{background:var(--rowh)}
+  tr.allrow td{background:#f6f8fc;border-bottom:2px solid var(--gline)}
+  .alab{font-weight:700;font-size:13.5px}
+  .asub{color:var(--mut);font-size:11.5px;line-height:1.35}
+  .cell{display:flex;align-items:center;justify-content:center;min-height:44px;user-select:none;
+    font:700 15px/1 var(--mono)}
   .cell.t{cursor:pointer}
   .cell.t:hover{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
   .on{color:var(--on);background:var(--on-bg)}
   .off{color:var(--off);background:var(--off-bg)}
   .ask{color:var(--ask);background:var(--ask-bg)}
+  .mix{color:var(--mix);background:var(--mix-bg)}
   .na{color:var(--na)}
-  .blk{color:var(--na);background:#f1f2f5;font-size:12px}
+  .add{color:var(--on);background:var(--on-bg)}
+  .blk{color:var(--blk);background:var(--blk-bg);font-size:13px}
   td.chg .cell{box-shadow:inset 0 0 0 2px var(--chg);border-radius:8px}
-  footer{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  .cell.desk{color:var(--mut);font-size:14px;cursor:help;
+    background:repeating-linear-gradient(-45deg,#f3f5f9 0 8px,#eef1f6 8px 16px)}
+  .pip{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 5px;
+    border-radius:6px;border:1px solid transparent;font:700 13px/1 var(--mono)}
+  .pip.on{background:var(--on-bg);color:var(--on);border-color:var(--on-ln)}
+  .pip.off{background:var(--off-bg);color:var(--off);border-color:var(--off-ln)}
+  .pip.ask{background:var(--ask-bg);color:var(--ask);border-color:var(--ask-ln)}
+  .pip.mix{background:var(--mix-bg);color:var(--mix);border-color:var(--mix-ln)}
+  .pip.blk{background:var(--blk-bg);color:var(--blk);border-color:var(--blk-ln);font-size:12px}
+  footer{margin-top:auto;flex:none;background:var(--card);border-top:1px solid var(--line);
     padding:12px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  button{font:inherit;font-weight:600;border-radius:9px;padding:9px 16px;cursor:pointer;border:1px solid var(--line);background:var(--card)}
+  button{font:inherit;font-weight:600;font-size:14px;border-radius:9px;padding:8px 16px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--ink)}
+  button:hover:not(:disabled){border-color:#c9d2e2}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover:not(:disabled){background:#1e3cab;border-color:#1e3cab}
   button:disabled{opacity:.45;cursor:default}
-  #count{color:var(--mut);font-size:13px}
+  :is(button,input,summary):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #count{color:var(--mut);font-family:var(--mono);font-size:12.5px}
   #okmsg{color:var(--on);font-size:13px;font-weight:600}
   #out{position:absolute;left:-9999px;top:0}
-  .newb{display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px;
-    background:var(--accent);color:#fff;margin-right:4px;vertical-align:1px}
+  .newb{display:inline-block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+    border-radius:5px;padding:1px 5px;background:var(--accent);color:#fff;margin-right:6px;vertical-align:1px}
   .hidebtn{display:inline-block;margin-left:6px;padding:0 5px;border-radius:5px;cursor:pointer;
-    color:var(--mut);font-weight:700}
+    color:var(--na);font-weight:700}
   .hidebtn:hover{background:var(--off-bg);color:var(--off)}
   .hpanel{margin:0 24px 8px;font-size:13px;color:var(--mut)}
-  .hpanel summary{cursor:pointer;font-weight:600}
-  .hpanel .hitem{display:inline-flex;align-items:center;gap:6px;margin:6px 12px 0 0;
+  .hpanel summary{cursor:pointer;font-weight:600;width:max-content;border-radius:6px;padding:1px 4px}
+  .hpanel .gnote{margin:8px 0 2px;max-width:920px;line-height:1.55}
+  .hpanel .hitem{display:inline-flex;align-items:center;gap:8px;margin:6px 12px 0 0;
     background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 10px}
   .hpanel .hitem.pend{outline:2px solid var(--chg)}
+  .hpanel .gname{font-family:var(--mono);font-weight:600;color:var(--ink)}
+  .hpanel .hitem small{color:var(--mut);font-size:11.5px}
+  .hpanel .hitem small.dn{color:var(--blk);cursor:help}
   .hpanel button{padding:2px 8px;font-size:12px}
+  @media (prefers-reduced-motion:no-preference){
+    button,.mode button{transition:background .12s,color .12s,border-color .12s}
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>MCP-дашборд</h1>
-  <div class="sub">Какие MCP-серверы есть и в каких проектах включены. Страница <b>сама ничего
-  не меняет</b>: щёлкай по ячейкам ✓/✕, затем нажми «Скопировать изменения» и вставь блок
-  в чат агенту — он всё применит. Секретов на странице нет: значения ключей скрыты.
-  Ненужные проекты скрывай крестиком в шапке колонки — это тоже уедет в блок изменений,
-  и в следующий раз они не покажутся. Коннекторы claude.ai появляются в списке после
-  первого выключения через /mcp — реестра «включённых везде» коннекторов в локальном
-  конфиге нет.</div>
+  <h1><span class="mark">MCP</span> дашборд</h1>
+  <details class="sub">
+    <summary>ℹ️ Описание — как пользоваться</summary>
+    <div class="cards">
+      <p><span class="ic">🖱️</span><b>Как менять.</b> Страница <b>сама ничего не меняет</b>:
+      строка — проект, колонка — сервер. Щёлкай по клеткам ✓/✕, нажми «Скопировать изменения»
+      и вставь блок в чат агенту — он всё аккуратно применит. Наведи курсор на имя сервера
+      в шапке — увидишь, как он подключён (stdio/http, команда или адрес).</p>
+      <p><span class="ic">🌐</span><b>Строка «Все проекты».</b> Верхняя строка переключает
+      сервер сразу во всех проектах, где он есть; ниже — тонкая настройка по-проектно.
+      Символ ± значит «включён не везде».</p>
+      <p><span class="ic">🔒</span><b>Секреты.</b> Значения API-ключей и токенов на страницу
+      не попадают — видны только имена переменных.</p>
+      <p><span class="ic">🙈</span><b>Лишние проекты.</b> Скрывай крестиком в строке проекта —
+      это тоже уедет в блок изменений, и в следующий раз они не покажутся.</p>
+      <p><span class="ic">🔌</span><b>Коннекторы claude.ai.</b> Появляются в списке после
+      первого выключения через /mcp — реестра «включённых везде» коннекторов в локальном
+      конфиге нет.</p>
+      <p><span class="ic">🖥️</span><b>Режим Claude Desktop.</b> Приложение управляет
+      коннекторами claude.ai само и попроектные настройки не читает — в этом режиме их
+      колонки свёрнуты и не переключаются. Работаешь в терминале или IDE — выбери
+      «Claude Code (CLI)».</p>
+      <p><span class="ic">➕</span><b>Сервер — в другой проект.</b> У локальных и
+      .mcp.json-серверов в чужих проектах стоит бледный «+»: клик — и агент подключит
+      сервер туда (локальный — скопирует конфиг, .mcp.json — допишет в файл проекта
+      и одобрит). Совсем новые серверы подключает скилл connect-mcp.</p>
+      <p><span class="ic">🧹</span><b>Рудименты.</b> Имена удалённых серверов, застрявшие
+      в списках конфига. Разверни панель «Рудименты», нажми «очистить» — уборка уедет
+      в тот же блок изменений.</p>
+    </div>
+  </details>
 </header>
 <div class="toolbar">
+  <div class="mode" title="Где ты работаешь — влияет на то, чем можно управлять с этой страницы">
+    <button id="m_desktop" onclick="setMode('desktop')">Claude Desktop</button>
+    <button id="m_cli" onclick="setMode('cli')">Claude Code (CLI)</button>
+  </div>
   <input id="q" type="search" placeholder="Фильтр по серверу или проекту…" oninput="render()">
   <div class="legend">
-    <span><b style="color:var(--on)">✓</b> включён</span>
-    <span><b style="color:var(--off)">✕</b> выключен</span>
-    <span><b style="color:var(--ask)">?</b> ждёт одобрения (.mcp.json)</span>
-    <span><b style="color:var(--na)">—</b> не подключён к проекту</span>
-    <span><b style="color:var(--na)">⛔</b> заблокирован в настройках</span>
-    <span><b style="color:var(--chg)">рамка</b> — твоё изменение</span>
+    <span><span class="pip on">✓</span> включён</span>
+    <span><span class="pip off">✕</span> выключен</span>
+    <span><span class="pip ask">?</span> ждёт одобрения (.mcp.json)</span>
+    <span><span class="pip mix">±</span> включён не везде</span>
+    <span><span class="pip" style="color:var(--na)">—</span> не подключён</span>
+    <span><span class="pip" style="color:var(--na)">+</span> можно подключить (клик)</span>
+    <span><span class="pip blk">⛔</span> заблокирован в настройках</span>
+    <span id="lg_desk" style="display:none"><b>🖥</b> управляется в приложении Claude Desktop</span>
+    <span><b style="color:var(--chg)">кольцо</b> — твоё изменение</span>
   </div>
 </div>
+<details class="hpanel" id="gp"></details>
 <details class="hpanel" id="hp"></details>
 <div class="wrap"><table id="tbl"></table></div>
 <footer>
-  <button class="primary" id="copyBtn" onclick="copyResult()" disabled>📋 Скопировать изменения</button>
+  <button class="primary" id="copyBtn" onclick="copyResult()" disabled>Скопировать изменения</button>
   <button onclick="resetAll()">Сбросить</button>
   <span id="count"></span>
   <span id="okmsg"></span>
@@ -98,16 +189,45 @@
 <script>
 const DATA = /*__MCP_DATA__*/null;
 const GROUPS = [
-  ["global",  "Глобальные серверы (user scope — доступны во всех проектах)"],
-  ["dynamic", "Коннекторы claude.ai и плагины (управляются снаружи, здесь можно только вкл/выкл)"],
-  ["local",   "Локальные серверы (подключены к одному проекту)"],
-  ["mcpjson", "Проектные серверы (.mcp.json в репозитории)"],
+  {id:"global",    label:"Глобальные · user scope",
+   tip:"Подключены агентом в user scope — по умолчанию доступны во всех проектах"},
+  {id:"builtin",   label:"Встроенные",
+   tip:"Встроены в сам Claude Code (расширение Chrome, интеграция с IDE) — доступны везде, можно выключать по проектам"},
+  {id:"connector", label:"Коннекторы claude.ai",
+   tip:"Подключены на claude.ai или в приложении Claude Desktop — в локальном конфиге видны только попроектные выключения"},
+  {id:"plugin",    label:"Плагины",
+   tip:"MCP-серверы, которые привезли с собой плагины Claude Code"},
+  {id:"local",     label:"Локальные · local scope",
+   tip:"Подключены агентом к одному конкретному проекту"},
+  {id:"mcpjson",   label:"Проектные · .mcp.json",
+   tip:"Определены в файле .mcp.json в репозитории проекта; «?» — сервер ещё не одобрен в этом проекте"},
 ];
-const SYM = {on:"✓", off:"✕", ask:"?", na:"—", blk:"⛔"};
+const DESK_TIP = "Приложение Claude Desktop берёт коннекторы прямо с аккаунта claude.ai и " +
+  "не читает попроектные настройки. Включать и выключать — значком инструментов в самом " +
+  "приложении или отвязкой коннектора на claude.ai.";
+const SYM = {on:"✓", off:"✕", ask:"?", na:"—", blk:"⛔", mix:"±", add:"+"};
 const changed = {};           // JSON.stringify([server,path]) -> desired "on"|"off"
+const ghostPend = {};         // ghost name -> true (queued for cleanup)
 
 const key = (s,p) => JSON.stringify([s,p]);
 const state = (s,p) => changed[key(s,p)] || DATA.states[s][p];
+const qq = v => JSON.stringify(v).replace(/"/g,"&quot;");
+
+// "где работаешь": Claude Desktop игнорирует попроектный конфиг коннекторов claude.ai
+const BASE_MODE = DATA.uiMode === "cli" ? "cli" : "desktop";
+let mode = BASE_MODE;
+const deskManaged = s => s.group === "connector";
+
+function setMode(m){
+  if (m === mode) return;
+  mode = m;
+  if (mode === "desktop")  // правки коннекторов в десктопе бессмысленны — снимаем
+    for (const k in changed){
+      const srv = DATA.servers.find(x => x.name === JSON.parse(k)[0]);
+      if (srv && deskManaged(srv)) delete changed[k];
+    }
+  render();
+}
 
 const vis = {};               // path -> pending hidden(true)/shown(false)
 const isHidden = p => vis[p.path] !== undefined ? vis[p.path] : !!p.hidden;
@@ -122,9 +242,11 @@ function toggleVis(path){
 function toggle(s,p){
   const orig = DATA.states[s][p];
   const cur = state(s,p);
-  // on ↔ off; ask-cells cycle ask → on → off → ask so a single edit is revertible
+  // on ↔ off; ask-cells cycle ask → on → off → ask so a single edit is revertible;
+  // na-cells of local servers toggle na ↔ add ("подключить сюда")
   let next;
-  if (cur === "ask") next = "on";
+  if (orig === "na") next = cur === "na" ? "add" : "na";
+  else if (cur === "ask") next = "on";
   else if (cur === "on") next = "off";
   else next = orig === "ask" ? "ask" : "on";
   if (next === orig) delete changed[key(s,p)];
@@ -132,40 +254,154 @@ function toggle(s,p){
   render();
 }
 
+// строка «Все проекты»: агрегат по всем не-скрытым проектам, где сервер вообще есть
+// (по ИСХОДНОМУ состоянию — отложенный «+» не делает проект управляемым отсюда)
+function applicable(s){
+  return DATA.projects.filter(p => !isHidden(p))
+    .map(p => ({p: p.path, st: state(s, p.path), orig: DATA.states[s][p.path]}))
+    .filter(x => x.orig !== "na" && x.orig !== "blk");
+}
+function aggState(s){
+  const cells = applicable(s);
+  if (!cells.length)
+    return DATA.projects.some(p => !isHidden(p) && state(s, p.path) === "blk") ? "blk" : "na";
+  const set = new Set(cells.map(x => x.st));
+  return set.size === 1 ? cells[0].st : "mix";
+}
+function toggleAll(s){
+  const target = aggState(s) === "on" ? "off" : "on";
+  for (const c of applicable(s)){
+    if (DATA.states[s][c.p] === target) delete changed[key(s, c.p)];
+    else changed[key(s, c.p)] = target;
+  }
+  render();
+}
+
+function toggleGhost(name){
+  if (ghostPend[name]) delete ghostPend[name]; else ghostPend[name] = true;
+  render();
+}
+
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+
+const colLabel = s =>
+  s.group === "connector" ? s.name.slice("claude.ai ".length) :
+  s.group === "plugin"    ? s.name.replace(/^plugin:/, "") : s.name;
+
+function thTitle(s, glabel){
+  let t = s.name + "\n" + glabel;
+  if ((s.group === "local" || s.group === "mcpjson") && s.definedIn.length){
+    const names = s.definedIn.map(pt => (DATA.projects.find(p => p.path === pt) || {name: pt}).name);
+    t += "\nподключён в: " + names.join(", ");
+  }
+  if (s.transport) t += "\nтранспорт: " + s.transport;
+  if (s.detail) t += "\n" + s.detail;
+  if (s.envKeys.length) t += "\nenv: " + s.envKeys.join(", ");
+  return t;
+}
 
 function render(){
   const q = document.getElementById("q").value.trim().toLowerCase();
   const visible = DATA.projects.filter(p => !isHidden(p));
-  const shown = q && visible.some(p=>p.path.toLowerCase().includes(q))
-    ? visible.filter(p=>p.path.toLowerCase().includes(q)) : visible;
-  let html = "<thead><tr><th>Сервер</th>" + shown.map(p =>
-    `<th title="${esc(p.path)}">` + (p.new ? `<span class="newb">новый</span>` : "") +
-    `${esc(p.name)}<span class="hidebtn" title="Скрыть проект из дашборда" ` +
-    `onclick="toggleVis(${JSON.stringify(p.path).replace(/"/g,"&quot;")})">✕</span></th>`
-  ).join("") + "</tr></thead><tbody>";
-  for (const [gid, glabel] of GROUPS){
-    const rows = DATA.servers.filter(s => s.group === gid &&
-      (!q || s.name.toLowerCase().includes(q) || DATA.projects.some(p=>p.path.toLowerCase().includes(q))));
-    if (!rows.length) continue;
-    html += `<tr class="group"><td colspan="${shown.length+1}">${glabel}</td></tr>`;
-    for (const s of rows){
-      const env = s.envKeys.length ? ` · env: ${s.envKeys.join(", ")}` : "";
-      html += `<tr><td><div class="srv">${esc(s.name)}` +
-        (s.transport ? `<span class="badge">${esc(s.transport)}</span>` : "") +
-        `</div><div class="det">${esc(s.detail)}${esc(env)}</div></td>`;
-      for (const p of shown){
-        const st = state(s.name, p.path);
-        const tgl = st !== "na" && st !== "blk";
-        const chg = changed[key(s.name,p.path)] ? " chg" : "";
-        html += `<td class="${chg}"><div class="cell ${st}${tgl?" t":""}"` +
-          (tgl ? ` onclick="toggle(${JSON.stringify(s.name).replace(/"/g,"&quot;")},${JSON.stringify(p.path).replace(/"/g,"&quot;")})"` : "") +
-          `>${SYM[st]}</div></td>`;
-      }
-      html += "</tr>";
+  const pMatch = q ? visible.filter(p => p.path.toLowerCase().includes(q)) : [];
+  const rowsP = q && pMatch.length ? pMatch : visible;
+  const sMatch = q ? DATA.servers.filter(s => s.name.toLowerCase().includes(q)) : [];
+  const cols = q && sMatch.length && !pMatch.length ? sMatch : DATA.servers;
+
+  const groups = [];
+  for (const g of GROUPS){
+    const servers = cols.filter(s => s.group === g.id);
+    if (!servers.length) continue;
+    groups.push({...g, servers, collapsed: g.id === "connector" && mode === "desktop"});
+  }
+
+  let html = `<thead><tr class="gh"><th class="corner" rowspan="2">Проект</th>`;
+  for (const g of groups){
+    const lbl = g.collapsed ? "🖥 " + g.label : g.label;
+    const tip = g.collapsed ? DESK_TIP + "\n\n" + g.servers.map(s => s.name).join("\n") : g.tip;
+    html += `<th class="gs" colspan="${g.collapsed ? 1 : g.servers.length}" title="${esc(tip)}"><span class="gl">${esc(lbl)}</span></th>`;
+  }
+  html += `</tr><tr class="sh">`;
+  for (const g of groups){
+    if (g.collapsed){
+      html += `<th class="gs" title="${esc(DESK_TIP)}"><span class="svn mut">управляется в приложении</span></th>`;
+      continue;
     }
+    g.servers.forEach((s, i) => {
+      html += `<th class="${i ? "" : "gs"}" title="${esc(thTitle(s, g.label))}">` +
+        `<span class="svn">${esc(colLabel(s))}</span>` +
+        (s.transport ? `<span class="tp">${esc(s.transport)}</span>` : "") + `</th>`;
+    });
+  }
+  html += `</tr></thead><tbody>`;
+
+  // строка глобального управления
+  if (visible.length){
+    html += `<tr class="allrow"><td class="pcell" title="Переключает сервер во всех проектах сразу (${visible.length}), где он подключён. Скрытые проекты не затрагиваются."><span class="alab">🌐 Все проекты</span><div class="asub">разом — везде, где сервер есть</div></td>`;
+    for (const g of groups){
+      if (g.collapsed){
+        html += `<td class="gs"><div class="cell desk" title="${esc(DESK_TIP)}">🖥</div></td>`;
+        continue;
+      }
+      g.servers.forEach((s, i) => {
+        const st = aggState(s.name);
+        const tgl = st !== "na" && st !== "blk";
+        html += `<td class="${i ? "" : "gs"}"><div class="cell ${st}${tgl ? " t" : ""}"` +
+          (tgl ? ` onclick="toggleAll(${qq(s.name)})" title="Переключить «${esc(s.name)}» во всех проектах"` : "") +
+          `>${SYM[st]}</div></td>`;
+      });
+    }
+    html += `</tr>`;
+  }
+
+  for (const p of rowsP){
+    html += `<tr><td class="pcell">` + (p.new ? `<span class="newb">новый</span>` : "") +
+      `<span class="pname" title="${esc(p.path)}">${esc(p.name)}</span>` +
+      `<span class="hidebtn" title="Скрыть проект из дашборда" onclick="toggleVis(${qq(p.path)})">✕</span></td>`;
+    for (const g of groups){
+      if (g.collapsed){
+        html += `<td class="gs"><div class="cell desk" title="${esc(DESK_TIP)}">🖥</div></td>`;
+        continue;
+      }
+      g.servers.forEach((s, i) => {
+        const st = state(s.name, p.path);
+        const canAdd = st === "na" && s.definedIn.length > 0 &&
+          (s.group === "local" || s.group === "mcpjson");
+        const tgl = (st !== "na" && st !== "blk") || canAdd;
+        const cls = (changed[key(s.name, p.path)] ? "chg " : "") + (i ? "" : "gs");
+        const tip = canAdd
+          ? (s.group === "mcpjson"
+             ? ` title="Подключить «${esc(s.name)}» в этот проект — агент допишет его в .mcp.json проекта и одобрит"`
+             : ` title="Подключить «${esc(s.name)}» в этот проект — агент скопирует конфиг из проекта, где сервер уже подключён"`)
+          : st === "add" ? ` title="Будет подключён в этот проект"` : "";
+        html += `<td class="${cls}"><div class="cell ${st}${tgl ? " t" : ""}"${tip}` +
+          (tgl ? ` onclick="toggle(${qq(s.name)},${qq(p.path)})"` : "") +
+          `>${canAdd ? "+" : SYM[st]}</div></td>`;
+      });
+    }
+    html += `</tr>`;
   }
   document.getElementById("tbl").innerHTML = html + "</tbody>";
+  document.getElementById("m_cli").classList.toggle("active", mode === "cli");
+  document.getElementById("m_desktop").classList.toggle("active", mode === "desktop");
+  document.getElementById("lg_desk").style.display = mode === "desktop" ? "" : "none";
+
+  const gp = document.getElementById("gp");
+  if (DATA.ghosts.length){
+    gp.style.display = "";
+    gp.innerHTML = `<summary>🧹 Рудименты (${DATA.ghosts.length}) — следы удалённых серверов в конфиге</summary>` +
+      `<div class="gnote">Эти имена остались в списках «включено/выключено», но самих серверов уже нет.
+      На работу они не влияют, только захламляют конфиг. «Очистить» добавит уборку в блок изменений.</div>` +
+      DATA.ghosts.map(g => {
+        const tip = g.projects.map(x => `${x.path} — ${x.sources.join(", ")}`).join("\n");
+        return `<span class="hitem${ghostPend[g.name] ? " pend" : ""}">` +
+          `<span class="gname" title="${esc(tip)}">${esc(g.name)}</span>` +
+          (g.projects.length ? `<small>${esc(g.projects.map(x => x.name).join(", "))}</small>` : "") +
+          (g.denied ? `<small class="dn" title="Имя лежит и в deniedMcpServers в ~/.claude/settings.json — оттуда убирается только вручную">⛔ settings.json</small>` : "") +
+          (g.projects.length ? `<button onclick="toggleGhost(${qq(g.name)})">${ghostPend[g.name] ? "отменить" : "очистить"}</button>` : "") +
+          `</span>`;
+      }).join("");
+  } else { gp.style.display = "none"; gp.innerHTML = ""; }
 
   const hiddenList = DATA.projects.filter(p => isHidden(p));
   const hp = document.getElementById("hp");
@@ -174,11 +410,12 @@ function render(){
     hp.innerHTML = `<summary>Скрытые проекты (${hiddenList.length})</summary>` +
       hiddenList.map(p => `<span class="hitem${vis[p.path] !== undefined ? " pend" : ""}">` +
         `<span title="${esc(p.path)}">${esc(p.name)}</span>` +
-        `<button onclick="toggleVis(${JSON.stringify(p.path).replace(/"/g,"&quot;")})">вернуть</button></span>`
+        `<button onclick="toggleVis(${qq(p.path)})">вернуть</button></span>`
       ).join("");
   } else { hp.style.display = "none"; hp.innerHTML = ""; }
 
-  const n = Object.keys(changed).length + Object.keys(vis).length;
+  const n = Object.keys(changed).length + Object.keys(vis).length +
+    Object.keys(ghostPend).length + (mode !== BASE_MODE ? 1 : 0);
   document.getElementById("count").textContent =
     n ? `изменений: ${n}` : `серверов: ${DATA.servers.length} · проектов: ${visible.length}${hiddenList.length ? ` (+${hiddenList.length} скрыто)` : ""} · снимок: ${DATA.generatedAt}`;
   document.getElementById("copyBtn").disabled = !n;
@@ -187,21 +424,32 @@ function render(){
 function resetAll(){
   for (const k in changed) delete changed[k];
   for (const k in vis) delete vis[k];
+  for (const k in ghostPend) delete ghostPend[k];
+  mode = BASE_MODE;
   render();
 }
 
 function buildResult(){
   const byProject = {};
+  const bucket = p => byProject[p] = byProject[p] || {enable:[], disable:[], cleanup:[], add:[]};
   for (const k in changed){
     const [s, p] = JSON.parse(k);
-    (byProject[p] = byProject[p] || {enable:[], disable:[]})[changed[k] === "on" ? "enable" : "disable"].push(s);
+    const act = changed[k] === "on" ? "enable" : changed[k] === "off" ? "disable" : "add";
+    bucket(p)[act].push(s);
+  }
+  for (const name in ghostPend){
+    const g = DATA.ghosts.find(x => x.name === name);
+    for (const pr of g.projects) bucket(pr.path).cleanup.push(name);
   }
   let out = "=== MCP CHANGES ===\n";
+  if (mode !== BASE_MODE) out += "mode: " + mode + "\n";
   for (const p of Object.keys(vis).sort()) out += (vis[p] ? "hide: " : "show: ") + p + "\n";
   for (const p of Object.keys(byProject).sort()){
     out += "project: " + p + "\n";
+    if (byProject[p].add.length)     out += "add: "     + byProject[p].add.sort().join(", ") + "\n";
     if (byProject[p].enable.length)  out += "enable: "  + byProject[p].enable.sort().join(", ") + "\n";
     if (byProject[p].disable.length) out += "disable: " + byProject[p].disable.sort().join(", ") + "\n";
+    if (byProject[p].cleanup.length) out += "cleanup: " + byProject[p].cleanup.sort().join(", ") + "\n";
   }
   return out + "=== END ===";
 }

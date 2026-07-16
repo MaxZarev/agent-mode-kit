@@ -33,6 +33,14 @@ SECRETISH_VALUE = re.compile(r"^[A-Za-z0-9_\-\.=+/]{20,}$")
 PATHISH = re.compile(r"^([/~.]|[A-Za-z]:[\\/])")  # filesystem paths are not secrets
 URLISH = re.compile(r"^\w+://")
 MASK = "•••"  # •••
+# claude.ai connectors ("claude.ai Gmail", …) — the Claude Desktop app pulls
+# them straight from the account and ignores per-project config entirely
+CONNECTOR_PREFIX = "claude.ai "
+# plugin-provided servers ("plugin:name@marketplace") — defined by the plugin, not here
+PLUGIN_PREFIX = "plugin:"
+# servers built into Claude Code itself — no definition anywhere in the config,
+# yet per-project disabling via disabledMcpServers is perfectly legitimate
+BUILTIN_SERVERS = {"claude-in-chrome", "ide"}
 
 
 # ---------------------------------------------------------------- helpers
@@ -163,6 +171,20 @@ def mcpjson_state(name, entry, settings):
     return "ask"
 
 
+def dynamic_group(name):
+    """Group for a name that exists only in disable lists. claude.ai connectors,
+    plugin servers and Claude Code's built-in servers legitimately have no
+    definition in ~/.claude.json — anything else found there is a stale
+    leftover of a removed server."""
+    if name.startswith(CONNECTOR_PREFIX):
+        return "connector"
+    if name.startswith(PLUGIN_PREFIX):
+        return "plugin"
+    if name in BUILTIN_SERVERS:
+        return "builtin"
+    return None
+
+
 def collect(include_missing=False):
     config = read_json(CLAUDE_JSON)
     if config is None:
@@ -174,9 +196,8 @@ def collect(include_missing=False):
         exists = os.path.isdir(path)
         if exists or include_missing:
             projects.append({"path": path, "name": home_short(path), "exists": exists})
-    ppaths = [p["path"] for p in projects]
 
-    servers = {}   # name -> row
+    servers = {}   # name -> column descriptor
     states = {}    # name -> {path: state}
 
     def row(name, group, defn=None, defined_in=None):
@@ -188,6 +209,7 @@ def collect(include_missing=False):
             r["definedIn"].append(defined_in)
         return r
 
+    # 1. Servers with a real definition: user scope, local scope, repo .mcp.json.
     for name, defn in (config.get("mcpServers") or {}).items():
         row(name, "global", defn)
 
@@ -202,14 +224,40 @@ def collect(include_missing=False):
         for name, defn in project_mcpjson.items():
             row(name, "mcpjson", defn, defined_in=path)
             states.setdefault(name, {})[path] = mcpjson_state(name, entry, settings)
+
+    # 2. Names that live only in disable/approval lists. Connectors and plugin
+    #    servers are real despite having no definition here; every other such
+    #    name is a "ghost" — a leftover of a server that was since removed.
+    #    Ghosts go to a cleanup list instead of masquerading as servers.
+    ghost_hits = {}   # name -> {path: [config keys the name lingers in]}
+
+    def ghost(name, path, source):
+        ghost_hits.setdefault(name, {}).setdefault(path, []).append(source)
+
+    for p in projects:
+        path, entry = p["path"], raw_projects[p["path"]]
         for name in entry.get("disabledMcpServers") or []:
-            if name not in servers:
-                row(name, "dynamic")
+            if name in servers:
+                continue
+            group = dynamic_group(name)
+            if group:
+                row(name, group)
+            else:
+                ghost(name, path, "disabledMcpServers")
+    for p in projects:
+        path, entry = p["path"], raw_projects[p["path"]]
+        for key in ("enabledMcpjsonServers", "disabledMcpjsonServers"):
+            lst = entry.get(key)
+            if not isinstance(lst, list):
+                continue
+            for name in lst:
+                if name not in servers and name not in mcpjson_names[path]:
+                    ghost(name, path, key)
 
     denied = load_denied_servers()
     for name in sorted(denied):
-        if name not in servers:
-            row(name, "dynamic")
+        if name not in servers and dynamic_group(name):
+            row(name, dynamic_group(name))
 
     for name, r in servers.items():
         st = states.setdefault(name, {})
@@ -221,20 +269,35 @@ def collect(include_missing=False):
             if path in st:
                 continue
             disabled = name in (entry.get("disabledMcpServers") or [])
-            if r["group"] in ("global", "dynamic"):
+            if r["group"] in ("global", "builtin", "connector", "plugin"):
                 st[path] = "off" if disabled else "on"
             elif r["group"] == "local":
                 st[path] = ("off" if disabled else "on") if path in r["definedIn"] else "na"
             else:  # mcpjson server, project without that .mcp.json entry
                 st[path] = "na"
 
-    order = {"global": 0, "dynamic": 1, "local": 2, "mcpjson": 3}
-    rows = sorted(servers.values(), key=lambda r: (order[r["group"]], r["name"].lower()))
+    ghost_names = set(ghost_hits)
+    ghost_names.update(n for n in denied
+                       if n not in servers and dynamic_group(n) is None)
+    ghosts = []
+    for name in sorted(ghost_names, key=str.lower):
+        hits = ghost_hits.get(name, {})
+        ghosts.append({
+            "name": name, "denied": name in denied,
+            "projects": [{"path": path, "name": home_short(path),
+                          "sources": sorted(set(hits[path]))}
+                         for path in sorted(hits)],
+        })
+
+    order = {"global": 0, "builtin": 1, "connector": 2, "plugin": 3,
+             "local": 4, "mcpjson": 5}
+    cols = sorted(servers.values(), key=lambda r: (order[r["group"]], r["name"].lower()))
     return {
         "generatedAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "projects": projects,
-        "servers": rows,
+        "servers": cols,
         "states": states,
+        "ghosts": ghosts,
     }, mcpjson_names
 
 
@@ -252,6 +315,8 @@ def cmd_build(args):
     state["knownProjects"] = sorted(known | set(paths))
     state["hiddenProjects"] = sorted(hidden)
     save_state(state)
+    # default is "desktop" (the safer assumption) until the user picks CLI
+    data["uiMode"] = "cli" if state.get("uiMode") == "cli" else "desktop"
 
     template = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "..", "assets", "dashboard.html")
@@ -267,10 +332,16 @@ def cmd_build(args):
     print(os.path.abspath(out))
     if first_run:
         print("FIRST RUN: baseline of %d projects saved — hide the unneeded ones "
-              "on the page (the ✕ in a column header), they won't come back."
+              "on the page (the ✕ in a project row), they won't come back."
               % len(paths))
     for p in new:
         print("NEW PROJECT: %s" % p)
+    for g in data["ghosts"]:
+        where = ", ".join(p["name"] for p in g["projects"])
+        note = " (also in deniedMcpServers)" if g["denied"] and where else ""
+        if not where:
+            where = "~/.claude/settings.json deniedMcpServers"
+        print("RUDIMENT: %s — stale config entries in %s%s" % (g["name"], where, note))
 
 
 # ---------------------------------------------------------------- apply
@@ -279,17 +350,24 @@ def parse_changes(text):
     """Parse the block the dashboard's Copy button produces.
 
     === MCP CHANGES ===
+    mode: desktop
     hide: /abs/other-path
     show: /abs/third-path
     project: /abs/path
     enable: a, b
     disable: c
+    cleanup: old-ghost
+    add: exa
     === END ===
 
     hide/show are project-VISIBILITY lines (one path each, position-independent);
-    they go to the skill's state file, not to ~/.claude.json.
+    mode is the page's "where do you work" switch (cli | desktop). All three go
+    to the skill's state file, not to ~/.claude.json. cleanup removes stale
+    leftovers of deleted servers from the project's disable/approval lists.
+    add connects an existing local-scope server to this project by copying its
+    definition from the project where it is already configured.
     """
-    changes, current = [], None
+    changes, current, mode = [], None, None
     visibility = {"hide": [], "show": []}
     for line in text.splitlines():
         line = line.strip()
@@ -298,15 +376,22 @@ def parse_changes(text):
         key, _, value = line.partition(":")
         key, value = key.strip().lower(), value.strip()
         if key == "project":
-            current = {"project": value, "enable": [], "disable": []}
+            current = {"project": value, "enable": [], "disable": [],
+                       "cleanup": [], "add": []}
             changes.append(current)
-        elif key in ("enable", "disable") and current is not None:
+        elif key in ("enable", "disable", "cleanup", "add") and current is not None:
             current[key] += [n.strip() for n in value.split(",") if n.strip()]
         elif key in ("hide", "show") and value:
             visibility[key].append(value)
+        elif key == "mode":
+            if value not in ("cli", "desktop"):
+                sys.exit("ERROR: mode must be 'cli' or 'desktop', got %r" % value)
+            mode = value
         else:
             sys.exit("ERROR: unrecognized line in changes block: %r" % line)
-    return [c for c in changes if c["enable"] or c["disable"]], visibility
+    return ([c for c in changes
+             if c["enable"] or c["disable"] or c["cleanup"] or c["add"]],
+            visibility, mode)
 
 
 def _toggle_mcpjson(entry, name, action, warnings, path):
@@ -332,9 +417,9 @@ def _toggle_mcpjson(entry, name, action, warnings, path):
 
 def cmd_apply(args):
     with open(args.changes_file, "r", encoding="utf-8") as f:
-        changes, visibility = parse_changes(f.read())
-    if not changes and not visibility["hide"] and not visibility["show"]:
-        sys.exit("Nothing to apply: the block contains no enable/disable/hide/show lines.")
+        changes, visibility, mode = parse_changes(f.read())
+    if not changes and not visibility["hide"] and not visibility["show"] and not mode:
+        sys.exit("Nothing to apply: the block contains no enable/disable/hide/show/mode lines.")
 
     config = read_json(CLAUDE_JSON)
     if config is None:
@@ -347,6 +432,11 @@ def cmd_apply(args):
     state = load_state()
     hidden = set(state.get("hiddenProjects") or [])
     vis_log = []
+    ui_mode = "cli" if state.get("uiMode") == "cli" else "desktop"  # desktop is the default
+    if mode and mode != ui_mode:
+        vis_log.append("mode: %s (dashboard only)" % mode)
+    if mode:
+        ui_mode = mode
     for path in visibility["hide"]:
         if path not in raw_projects:
             sys.exit("ERROR: project %r (hide:) not found in ~/.claude.json — "
@@ -365,6 +455,106 @@ def cmd_apply(args):
             sys.exit("ERROR: project %r not found in ~/.claude.json — "
                      "re-run `build` and copy a fresh block." % path)
         in_mcpjson = mcpjson_names.get(path, set())
+        for name in change.get("add") or []:
+            if name in (config.get("mcpServers") or {}):
+                warnings.append("%r is a global (user-scope) server — it is already "
+                                "available in every project; nothing to add." % name)
+                continue
+            sources = []   # (project path, raw definition) — copied config-to-config
+            for spath in sorted(raw_projects):
+                defn = (raw_projects[spath].get("mcpServers") or {}).get(name)
+                if defn is not None:
+                    sources.append((spath, defn))
+            if sources:   # local-scope server: copy inside ~/.claude.json
+                src_path, defn = sources[0]
+                servers_map = entry.setdefault("mcpServers", {})
+                if name in servers_map:
+                    warnings.append("%r is already connected in %s — just making "
+                                    "sure it is enabled." % (name, home_short(path)))
+                else:
+                    if len({json.dumps(d, sort_keys=True) for _, d in sources}) > 1:
+                        warnings.append("%r is configured differently in %d projects "
+                                        "— copied the version from %s."
+                                        % (name, len(sources), home_short(src_path)))
+                    servers_map[name] = json.loads(json.dumps(defn))
+                    log.append("add %s in %s (config copied from %s)"
+                               % (name, home_short(path), home_short(src_path)))
+                dis = entry.get("disabledMcpServers")
+                if isinstance(dis, list) and name in dis:
+                    dis[:] = [n for n in dis if n != name]
+                    log.append("enable %s in %s" % (name, home_short(path)))
+                continue
+            # no local definition — maybe it lives in some repo's .mcp.json;
+            # then "add" means: merge the entry into the TARGET repo's .mcp.json
+            # (the one file this script touches outside ~/.claude.json) + approve it
+            json_sources = []
+            for spath in sorted(raw_projects):
+                defn = ((read_json(os.path.join(spath, ".mcp.json")) or {})
+                        .get("mcpServers") or {}).get(name)
+                if defn is not None:
+                    json_sources.append((spath, defn))
+            if not json_sources:
+                warnings.append("%r has no definition to copy — connect it with "
+                                "the connect-mcp skill instead." % name)
+                continue
+            src_path, defn = json_sources[0]
+            if len({json.dumps(d, sort_keys=True) for _, d in json_sources}) > 1:
+                warnings.append("%r is configured differently in %d repos — copied "
+                                "the version from %s."
+                                % (name, len(json_sources), home_short(src_path)))
+            if not os.path.isdir(path):
+                warnings.append("%s does not exist on disk — cannot write its "
+                                ".mcp.json; %r not added." % (home_short(path), name))
+                continue
+            target_file = os.path.join(path, ".mcp.json")
+            target = read_json(target_file)
+            if target is None and os.path.exists(target_file):
+                warnings.append("%s is not valid JSON — fix it by hand; %r not added."
+                                % (target_file, name))
+                continue
+            target = target or {}
+            tmap = target.setdefault("mcpServers", {})
+            if name in tmap:
+                warnings.append("%r is already in %s — just approving it."
+                                % (name, home_short(target_file)))
+            else:
+                tmap[name] = json.loads(json.dumps(defn))
+                if not args.dry_run:
+                    try:
+                        fd, tmp = tempfile.mkstemp(dir=path, prefix=".mcp.json.")
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
+                            json.dump(target, f, ensure_ascii=False, indent=2)
+                            f.write("\n")
+                        os.replace(tmp, target_file)
+                    except OSError as e:
+                        warnings.append("cannot write %s (%s) — %r not added."
+                                        % (target_file, e, name))
+                        continue
+                log.append("add %s in %s (.mcp.json entry copied from %s)"
+                           % (name, home_short(path), home_short(src_path)))
+            _toggle_mcpjson(entry, name, "enable", warnings, path)
+            log.append("approve %s in %s (.mcp.json)" % (name, home_short(path)))
+        for name in change.get("cleanup") or []:
+            if name in known_names:
+                warnings.append("%r is a live server, not a leftover — cleanup "
+                                "skipped; use enable/disable instead." % name)
+                continue
+            removed = False
+            for lkey in ("disabledMcpServers",
+                         "enabledMcpjsonServers", "disabledMcpjsonServers"):
+                lst = entry.get(lkey)
+                if isinstance(lst, list) and name in lst:
+                    lst[:] = [n for n in lst if n != name]
+                    removed = True
+            if name in denied:
+                warnings.append("%r is also listed in deniedMcpServers in "
+                                "~/.claude/settings.json — the script doesn't edit "
+                                "that file; remove the entry there manually." % name)
+            if removed:
+                log.append("cleanup %s in %s" % (name, home_short(path)))
+            else:
+                warnings.append("%r has no leftover entries in %s — nothing to clean."
+                                % (name, home_short(path)))
         for action in ("enable", "disable"):
             for name in change[action]:
                 if name not in known_names:
@@ -375,6 +565,14 @@ def cmd_apply(args):
                     warnings.append("%r is blocked by deniedMcpServers in "
                                     "~/.claude/settings.json — per-project enable "
                                     "won't unblock it; remove it there instead." % name)
+                if ui_mode == "desktop" and name.startswith(CONNECTOR_PREFIX):
+                    warnings.append("%r is a claude.ai connector and the dashboard "
+                                    "mode is Desktop — the Claude Desktop app pulls "
+                                    "connectors from the account and ignores per-project "
+                                    "config, so it won't notice this change (it still "
+                                    "applies to CLI/IDE sessions). In Desktop, manage "
+                                    "connectors via the tools icon in the app or by "
+                                    "unlinking on claude.ai." % name)
                 if name in in_mcpjson:
                     pinned = load_project_settings(path)
                     for key in ("enabledMcpjsonServers", "disabledMcpjsonServers"):
@@ -412,6 +610,8 @@ def cmd_apply(args):
         os.replace(tmp, target)
     if vis_log:
         state["hiddenProjects"] = sorted(hidden)
+        if mode:
+            state["uiMode"] = mode
         save_state(state)
 
     print("Applied %d change(s):" % len(log + vis_log))

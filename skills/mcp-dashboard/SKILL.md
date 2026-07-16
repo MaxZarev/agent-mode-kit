@@ -1,6 +1,6 @@
 ---
 name: mcp-dashboard
-description: Show and manage the user's MCP servers per project via a local HTML dashboard — which servers exist (global / claude.ai connectors / local / .mcp.json), where each is enabled or disabled, with click-to-toggle cells and a "copy changes" block the agent then applies safely to ~/.claude.json (backup + atomic write, secrets never shown). Use when the user wants an OVERVIEW or per-project ON/OFF control of already-configured MCP servers — e.g. «что у меня с MCP», «какие MCP подключены/включены», «покажи дашборд MCP», «включи/выключи <server> в проекте X», «отключи context7 везде кроме этого проекта», "show my MCPs", "mcp dashboard", "which MCP servers are enabled where", "disable an MCP for this project", or when the user pastes an "=== MCP CHANGES ===" block. NOT for adding/connecting a NEW server or OAuth sign-in — that's the connect-mcp skill.
+description: Show and manage the user's MCP servers per project via a local HTML dashboard — a projects × servers matrix (columns grouped: user scope / built-in / claude.ai connectors / plugins / local / .mcp.json) with an "all projects" master row, click-to-toggle cells, a stale-leftover cleanup panel, and a "copy changes" block the agent then applies safely to ~/.claude.json (backup + atomic write, secrets never shown). Use when the user wants an OVERVIEW or per-project ON/OFF control of already-configured MCP servers — e.g. «что у меня с MCP», «какие MCP подключены/включены», «покажи дашборд MCP», «включи/выключи <server> в проекте X», «отключи context7 везде кроме этого проекта», "show my MCPs", "mcp dashboard", "which MCP servers are enabled where", "disable an MCP for this project", or when the user pastes an "=== MCP CHANGES ===" block. Can also copy an already-configured local server into another project («добавь/подключи exa в проект X», when exa is already connected somewhere). NOT for connecting a brand-NEW server or OAuth sign-in — that's the connect-mcp skill.
 allowed-tools: Bash, Read, Write
 ---
 
@@ -17,8 +17,10 @@ the checkmarks", "copy the block and paste it here" — not "I'll mutate
 disabledMcpServers". Never print secret values (the page already masks them).
 
 **Scope guard:** adding a brand-new server (a URL, an npx command, OAuth) is the
-`connect-mcp` skill's job. This skill only *shows* what exists and flips
-existing servers on/off per project.
+`connect-mcp` skill's job. This skill *shows* what exists, flips existing
+servers on/off per project, and can copy an **already-configured local server**
+into another project (`add:` — «добавь exa в проект X» works here when exa is
+local somewhere).
 
 ## Placeholders
 
@@ -42,6 +44,11 @@ It prints the absolute path of `mcp-dashboard.html`, possibly followed by:
 - `NEW PROJECT: <path>` lines — projects that appeared since the last run.
   **Mention them to the user** ("с прошлого раза появились новые проекты: …");
   on the page they carry a «новый» badge.
+- `RUDIMENT: <name> — …` lines — stale leftovers: server names that sit in
+  disable/approval lists of some projects but no longer exist as servers
+  anywhere. **Mention them** ("в конфиге остались следы удалённых серверов: …")
+  and offer to clean them up — the page has a «Рудименты» panel with a
+  «очистить» button, or compose `cleanup:` lines yourself (Direct mode).
 
 Open the page for the user:
 
@@ -49,12 +56,31 @@ Open the page for the user:
 - Windows: `start "" "<path>"`
 - Linux: `xdg-open "<path>"`
 
-Then tell the user, briefly: the page shows every MCP server and every project;
+Then tell the user, briefly: the page is a matrix — **rows are projects, columns
+are servers**, grouped by where each server comes from (глобальные user scope /
+встроенные / коннекторы claude.ai / плагины / локальные / проектные `.mcp.json`).
 ✓ = enabled, ✕ = disabled, ? = a repo `.mcp.json` server not yet approved,
 — = not connected to that project, ⛔ = blocked by `deniedMcpServers` in
 `~/.claude/settings.json` (not clickable — unblocking means editing that file).
-To change something: click the cells, press **«Скопировать изменения»**, and
+The top row **«Все проекты»** toggles a server at once in every project where
+it exists (± means "enabled in some projects, not all"); the project rows below
+are for fine-tuning. Local and `.mcp.json` servers show a faint «+» in projects
+where they are not connected — clicking it queues "connect here" (on apply the
+script copies a local server's config entry inside `~/.claude.json`, or merges
+a `.mcp.json` entry into the target repo's `.mcp.json` and approves it). To
+change something: click the cells, press **«Скопировать изменения»**, and
 paste the copied block back into the chat.
+
+The page has a "where do you work" switch (top-left), **«Claude Desktop» by
+default**, remembered between runs. In Desktop mode the claude.ai connector
+columns collapse into one non-clickable column «управляется в приложении
+Claude Desktop»: the Desktop app pulls connectors straight from the claude.ai
+account and ignores per-project config entirely (`disabledMcpServers`,
+`deniedMcpServers`, `disableClaudeAiConnectors` — verified), so toggling them
+from here would change nothing — the user switches them via the tools icon in
+the app itself or by unlinking the connector on claude.ai. Users working in
+Claude Code CLI/IDE switch to «Claude Code (CLI)» — there per-project connector
+toggles do work. All other groups are toggleable in both modes.
 
 Known limitation to keep in mind: claude.ai connectors and plugin servers are
 listed only once they've been toggled off somewhere via `/mcp` — the local
@@ -74,17 +100,30 @@ When the user pastes a block like:
 
 ```
 === MCP CHANGES ===
+mode: cli
 hide: /Users/x/old-experiment
 show: /Users/x/comeback
 project: /Users/x/proj
+add: exa
 enable: context7
 disable: notion, claude.ai Gmail
+cleanup: old-removed-server
 === END ===
 ```
 
 `hide:` / `show:` lines (one path each) only control which projects the
-dashboard displays — they go to the skill's own state file, never to
-`~/.claude.json`, and don't affect any MCP server.
+dashboard displays, and `mode:` (cli | desktop) is the "where do you work"
+switch — all three go to the skill's own state file, never to `~/.claude.json`,
+and don't affect any MCP server. `cleanup:` removes the named leftovers from
+the project's disable/approval lists (the script refuses to "clean" a name
+that is still a live server). `add:` connects an existing server to this
+project: for a local-scope server the script copies its definition
+(command/URL, env, headers — secrets included, config-to-config, never through
+the chat) from the project where it is already configured and un-disables it;
+for a repo `.mcp.json` server it merges the entry into the TARGET project's
+`.mcp.json` file and approves it (`enabledMcpjsonServers`) — tell the user a
+file in the target repo was changed, they may want to commit it. Global
+servers don't need `add:` (they're everywhere already).
 
 1. Save it **verbatim** to `<tmp>/mcp-changes.txt` (Write tool — avoids shell
    quoting issues; server names may contain spaces).
@@ -114,6 +153,14 @@ If the user *names* exactly what to flip («выключи context7 в этом 
 JSON knowledge if you need to check names first — or run `build` anyway and
 read nothing but the printed path. Report the same way as in Step 2.
 
+When the change touches a `claude.ai *` connector and the saved mode is
+desktop (the default), the script prints a WARNING — relay it in plain
+language: the Claude Desktop app won't notice this change (it manages
+connectors itself — the tools icon in the app, or unlinking on claude.ai);
+the change still counts for Claude Code CLI/IDE sessions. If the user says
+they work in the terminal, offer to switch the saved mode with a
+`mode: cli` line so the warning stops.
+
 ## What the script actually edits (for your understanding, not for chat)
 
 - Global servers & claude.ai/plugin connectors: per-project
@@ -125,6 +172,21 @@ read nothing but the printed path. Report the same way as in Step 2.
   `.claude/settings*.json` inside the project — the script *reads* those for
   state (denylist wins) but never writes them; if a name is pinned there, the
   script prints a WARNING and the user must edit that file instead.
+- `add:` for a local server copies the raw definition between
+  `projects[*].mcpServers` entries of `~/.claude.json` (source = the project
+  where the name is defined; if several define it differently, the first
+  alphabetically wins with a WARNING) and removes the name from the target's
+  `disabledMcpServers`. For a `.mcp.json` server it merges the entry into
+  `<target>/.mcp.json` (atomic write; refuses to touch a file that isn't valid
+  JSON; skipped on --dry-run) and approves the name via the project entry —
+  the ONLY case where the script writes outside `~/.claude.json`.
+- `cleanup:` removes a stale name from the project's `disabledMcpServers`,
+  `enabledMcpjsonServers` and `disabledMcpjsonServers` lists. Names that still
+  are live servers are skipped with a WARNING. Names with no definition that
+  are NOT connectors/plugins/built-ins are reported by `build` as `RUDIMENT:`
+  lines and shown in the page's «Рудименты» panel instead of the matrix.
+  (Built-in servers — `claude-in-chrome`, `ide` — have no config definition by
+  design and get their own «Встроенные» column group, not a rudiment flag.)
 - `deniedMcpServers` in `~/.claude/settings.json` (globally blocked servers) is
   read-only for the script: such servers render as ⛔ and an `enable` attempt
   prints a WARNING pointing at the settings file.
@@ -132,9 +194,10 @@ read nothing but the printed path. Report the same way as in Step 2.
   preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`). The backup
   is skipped when the block contains only `hide:`/`show:` lines (config not touched).
 - The skill's own state — hidden projects + known projects (for new-project
-  detection) — lives in `~/.claude/mcp-dashboard.json` (or under
-  `CLAUDE_CONFIG_DIR`). Deleting that file resets visibility to "show all"
-  and re-baselines what counts as "new".
+  detection) + `uiMode` (the CLI/Desktop switch, desktop by default) — lives in
+  `~/.claude/mcp-dashboard.json` (or under `CLAUDE_CONFIG_DIR`). Deleting that
+  file resets visibility to "show all", re-baselines what counts as "new" and
+  returns the switch to Desktop.
 
 Caveat to keep in mind: other Claude Code sessions running *right now* may
 rewrite `~/.claude.json` and lose the applied change — if the user reports a

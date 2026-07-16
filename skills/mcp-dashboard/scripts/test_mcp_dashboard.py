@@ -126,18 +126,37 @@ class TestMcpjsonState(Base):
 
 class TestParseChanges(Base):
     def test_full_block(self):
-        changes, vis = self.mod.parse_changes(
+        changes, vis, mode = self.mod.parse_changes(
             "=== MCP CHANGES ===\n"
+            "mode: desktop\n"
             "hide: /a\nshow: /b\n"
-            "project: /p\nenable: x, claude.ai Gmail\ndisable: y\n"
+            "project: /p\nadd: exa\nenable: x, claude.ai Gmail\ndisable: y\n"
+            "cleanup: old-one\n"
             "=== END ===")
         self.assertEqual(vis, {"hide": ["/a"], "show": ["/b"]})
+        self.assertEqual(mode, "desktop")
         self.assertEqual(changes, [{"project": "/p",
                                     "enable": ["x", "claude.ai Gmail"],
-                                    "disable": ["y"]}])
+                                    "disable": ["y"],
+                                    "cleanup": ["old-one"],
+                                    "add": ["exa"]}])
+
+    def test_cleanup_only_block_kept(self):
+        changes, _, _ = self.mod.parse_changes("project: /p\ncleanup: ghost\n")
+        self.assertEqual(changes, [{"project": "/p", "enable": [],
+                                    "disable": [], "cleanup": ["ghost"],
+                                    "add": []}])
+
+    def test_no_mode_line_is_none(self):
+        _, _, mode = self.mod.parse_changes("project: /p\ndisable: srv\n")
+        self.assertIsNone(mode)
+
+    def test_bad_mode_exits(self):
+        with self.assertRaises(SystemExit):
+            self.mod.parse_changes("mode: web\n")
 
     def test_windows_path_value_keeps_colon(self):
-        changes, _ = self.mod.parse_changes(
+        changes, _, _ = self.mod.parse_changes(
             "project: C:\\Users\\x\\proj\ndisable: srv\n")
         self.assertEqual(changes[0]["project"], "C:\\Users\\x\\proj")
 
@@ -219,6 +238,182 @@ class TestApply(Base):
         out = self.run_cli("apply", ch)
         self.assertIn("deniedMcpServers", out)
 
+    def test_mode_only_saves_state_without_backup(self):
+        proj = self.make_project()
+        cfg = self.base_config(proj)
+        self.write_config(cfg)
+        ch = self.write_changes("mode: cli\n")
+        out = self.run_cli("apply", ch)
+        self.assertNotIn("Backup:", out)
+        self.assertEqual(self.read_config(), cfg)
+        state = json.load(open(os.path.join(self.dir, "mcp-dashboard.json")))
+        self.assertEqual(state["uiMode"], "cli")
+
+    def test_connector_toggle_warns_in_desktop_mode(self):
+        # no uiMode in state -> desktop is the default
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("project: %s\ndisable: claude.ai Gmail\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertIn("Claude Desktop", out)
+        self.assertIn("claude.ai Gmail",
+                      self.read_config()["projects"][proj]["disabledMcpServers"])
+
+    def test_connector_toggle_silent_in_cli_mode(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("mode: cli\nproject: %s\ndisable: claude.ai Gmail\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertNotIn("Claude Desktop", out)
+
+    def test_add_copies_local_definition(self):
+        src, dst = self.make_project("src"), self.make_project("dst")
+        defn = {"type": "http", "url": "https://exa/mcp",
+                "headers": {"X-Api-Key": "RAWSECRET123"}}
+        self.write_config({
+            "mcpServers": {},
+            "projects": {src: {"mcpServers": {"exa": defn}},
+                         dst: {"mcpServers": {},
+                               "disabledMcpServers": ["exa"]}}})
+        ch = self.write_changes("project: %s\nadd: exa\n" % dst)
+        out = self.run_cli("apply", ch)
+        entry = self.read_config()["projects"][dst]
+        self.assertEqual(entry["mcpServers"]["exa"], defn)
+        self.assertEqual(entry["disabledMcpServers"], [])
+        self.assertIn("add exa", out)
+        self.assertIn("Backup:", out)
+        self.assertNotIn("RAWSECRET123", out)  # secrets never printed
+
+    def test_add_global_server_warns_and_skips(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("project: %s\nadd: context7\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertIn("user-scope", out)
+        self.assertNotIn("mcpServers", self.read_config()["projects"][proj].get(
+            "mcpServers", {}))
+
+    def test_add_already_connected_just_enables(self):
+        proj = self.make_project()
+        defn = {"command": "npx", "args": ["exa-mcp"]}
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"mcpServers": {"exa": defn},
+                                "disabledMcpServers": ["exa"]}}})
+        ch = self.write_changes("project: %s\nadd: exa\n" % proj)
+        out = self.run_cli("apply", ch)
+        entry = self.read_config()["projects"][proj]
+        self.assertEqual(entry["mcpServers"]["exa"], defn)  # not duplicated/overwritten
+        self.assertEqual(entry["disabledMcpServers"], [])
+        self.assertIn("already connected", out)
+
+    def test_add_mcpjson_writes_target_repo_file_and_approves(self):
+        src, dst = self.make_project("src"), self.make_project("dst")
+        defn = {"command": "npx", "args": ["sandbox-mcp"]}
+        with open(os.path.join(src, ".mcp.json"), "w") as f:
+            json.dump({"mcpServers": {"sandbox": defn}}, f)
+        self.write_config({"mcpServers": {},
+                           "projects": {src: {}, dst: {}}})
+        ch = self.write_changes("project: %s\nadd: sandbox\n" % dst)
+        out = self.run_cli("apply", ch)
+        target = json.load(open(os.path.join(dst, ".mcp.json")))
+        self.assertEqual(target["mcpServers"]["sandbox"], defn)
+        entry = self.read_config()["projects"][dst]
+        self.assertIn("sandbox", entry["enabledMcpjsonServers"])
+        self.assertIn(".mcp.json entry copied from", out)
+
+    def test_add_mcpjson_merges_into_existing_file(self):
+        src, dst = self.make_project("src"), self.make_project("dst")
+        with open(os.path.join(src, ".mcp.json"), "w") as f:
+            json.dump({"mcpServers": {"sandbox": {"command": "npx"}}}, f)
+        with open(os.path.join(dst, ".mcp.json"), "w") as f:
+            json.dump({"mcpServers": {"other": {"command": "uvx"}}}, f)
+        self.write_config({"mcpServers": {}, "projects": {src: {}, dst: {}}})
+        ch = self.write_changes("project: %s\nadd: sandbox\n" % dst)
+        self.run_cli("apply", ch)
+        target = json.load(open(os.path.join(dst, ".mcp.json")))
+        self.assertEqual(set(target["mcpServers"]), {"other", "sandbox"})
+
+    def test_add_mcpjson_already_present_just_approves(self):
+        proj = self.make_project()
+        with open(os.path.join(proj, ".mcp.json"), "w") as f:
+            json.dump({"mcpServers": {"sandbox": {"command": "npx"}}}, f)
+        self.write_config({"mcpServers": {}, "projects": {proj: {}}})
+        ch = self.write_changes("project: %s\nadd: sandbox\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertIn("already in", out)
+        self.assertIn("sandbox",
+                      self.read_config()["projects"][proj]["enabledMcpjsonServers"])
+
+    def test_add_mcpjson_invalid_target_file_untouched(self):
+        src, dst = self.make_project("src"), self.make_project("dst")
+        with open(os.path.join(src, ".mcp.json"), "w") as f:
+            json.dump({"mcpServers": {"sandbox": {"command": "npx"}}}, f)
+        with open(os.path.join(dst, ".mcp.json"), "w") as f:
+            f.write("{broken json")
+        self.write_config({"mcpServers": {}, "projects": {src: {}, dst: {}}})
+        ch = self.write_changes("project: %s\nadd: sandbox\n" % dst)
+        out = self.run_cli("apply", ch)
+        self.assertIn("not valid JSON", out)
+        self.assertEqual(open(os.path.join(dst, ".mcp.json")).read(), "{broken json")
+
+    def test_add_mcpjson_dry_run_writes_nothing(self):
+        src, dst = self.make_project("src"), self.make_project("dst")
+        with open(os.path.join(src, ".mcp.json"), "w") as f:
+            json.dump({"mcpServers": {"sandbox": {"command": "npx"}}}, f)
+        cfg = {"mcpServers": {}, "projects": {src: {}, dst: {}}}
+        self.write_config(cfg)
+        ch = self.write_changes("project: %s\nadd: sandbox\n" % dst)
+        out = self.run_cli("apply", ch, "--dry-run")
+        self.assertIn("DRY RUN", out)
+        self.assertFalse(os.path.exists(os.path.join(dst, ".mcp.json")))
+        self.assertEqual(self.read_config(), cfg)
+
+    def test_add_without_source_warns(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("project: %s\nadd: nosuch\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertIn("connect-mcp", out)
+        self.assertNotIn("nosuch", json.dumps(
+            self.read_config()["projects"][proj].get("mcpServers", {})))
+
+    def test_cleanup_removes_stale_entries_everywhere(self):
+        proj = self.make_project()
+        cfg = self.base_config(proj)
+        cfg["projects"][proj]["disabledMcpServers"] = ["context7", "goner"]
+        cfg["projects"][proj]["enabledMcpjsonServers"] = ["goner"]
+        cfg["projects"][proj]["disabledMcpjsonServers"] = ["goner"]
+        self.write_config(cfg)
+        ch = self.write_changes("project: %s\ncleanup: goner\n" % proj)
+        out = self.run_cli("apply", ch)
+        entry = self.read_config()["projects"][proj]
+        self.assertEqual(entry["disabledMcpServers"], ["context7"])
+        self.assertEqual(entry["enabledMcpjsonServers"], [])
+        self.assertEqual(entry["disabledMcpjsonServers"], [])
+        self.assertIn("Backup:", out)
+
+    def test_cleanup_of_live_server_skipped(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("project: %s\ncleanup: context7\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertIn("live server", out)
+        self.assertIn("context7",
+                      self.read_config()["projects"][proj]["disabledMcpServers"])
+
+    def test_cleanup_of_denied_ghost_warns_about_settings(self):
+        proj = self.make_project()
+        cfg = self.base_config(proj)
+        cfg["projects"][proj]["disabledMcpServers"] = ["goner"]
+        self.write_config(cfg)
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"deniedMcpServers": [{"serverName": "goner"}]}, f)
+        ch = self.write_changes("project: %s\ncleanup: goner\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertIn("settings.json", out)
+        self.assertEqual(self.read_config()["projects"][proj]["disabledMcpServers"], [])
+
 
 class TestBuildAndCollect(Base):
     def test_build_writes_html_and_detects_new_projects(self):
@@ -235,6 +430,24 @@ class TestBuildAndCollect(Base):
         second = self.run_cli("build", "--out", out_dir)
         self.assertIn("NEW PROJECT: %s" % proj2, second)
 
+    def test_build_injects_ui_mode_desktop_by_default(self):
+        proj = self.make_project()
+        self.write_config({"mcpServers": {}, "projects": {proj: {}}})
+        out_dir = os.path.join(self.dir, "out")
+        self.run_cli("build", "--out", out_dir)
+        html = open(os.path.join(out_dir, "mcp-dashboard.html"), encoding="utf-8").read()
+        self.assertIn('"uiMode": "desktop"', html)
+
+    def test_build_respects_cli_mode_from_state(self):
+        proj = self.make_project()
+        self.write_config({"mcpServers": {}, "projects": {proj: {}}})
+        with open(os.path.join(self.dir, "mcp-dashboard.json"), "w") as f:
+            json.dump({"uiMode": "cli"}, f)
+        out_dir = os.path.join(self.dir, "out")
+        self.run_cli("build", "--out", out_dir)
+        html = open(os.path.join(out_dir, "mcp-dashboard.html"), encoding="utf-8").read()
+        self.assertIn('"uiMode": "cli"', html)
+
     def test_denied_server_state_blk(self):
         proj = self.make_project()
         self.write_config({
@@ -244,6 +457,72 @@ class TestBuildAndCollect(Base):
             json.dump({"deniedMcpServers": [{"serverName": "context7"}]}, f)
         data, _ = self.mod.collect()
         self.assertEqual(data["states"]["context7"][proj], "blk")
+
+    def test_ghost_not_a_server_column(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {"context7": {"type": "http", "url": "https://c7/mcp"}},
+            "projects": {proj: {"disabledMcpServers": ["goner"]}}})
+        data, _ = self.mod.collect()
+        self.assertNotIn("goner", [s["name"] for s in data["servers"]])
+        self.assertEqual(len(data["ghosts"]), 1)
+        g = data["ghosts"][0]
+        self.assertEqual(g["name"], "goner")
+        self.assertFalse(g["denied"])
+        self.assertEqual(g["projects"][0]["path"], proj)
+        self.assertEqual(g["projects"][0]["sources"], ["disabledMcpServers"])
+
+    def test_connector_and_plugin_get_their_groups(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"disabledMcpServers":
+                                ["claude.ai Gmail", "plugin:foo@bar"]}}})
+        data, _ = self.mod.collect()
+        groups = {s["name"]: s["group"] for s in data["servers"]}
+        self.assertEqual(groups["claude.ai Gmail"], "connector")
+        self.assertEqual(groups["plugin:foo@bar"], "plugin")
+        self.assertEqual(data["ghosts"], [])
+
+    def test_builtin_server_is_not_ghost(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"disabledMcpServers": ["claude-in-chrome"]}}})
+        data, _ = self.mod.collect()
+        groups = {s["name"]: s["group"] for s in data["servers"]}
+        self.assertEqual(groups["claude-in-chrome"], "builtin")
+        self.assertEqual(data["ghosts"], [])
+        self.assertEqual(data["states"]["claude-in-chrome"][proj], "off")
+
+    def test_mcpjson_leftover_is_ghost(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"enabledMcpjsonServers": ["gone-json"]}}})
+        data, _ = self.mod.collect()
+        self.assertNotIn("gone-json", [s["name"] for s in data["servers"]])
+        self.assertEqual(data["ghosts"][0]["projects"][0]["sources"],
+                         ["enabledMcpjsonServers"])
+
+    def test_denied_name_without_definition_is_denied_ghost(self):
+        proj = self.make_project()
+        self.write_config({"mcpServers": {}, "projects": {proj: {}}})
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"deniedMcpServers": ["goner"]}, f)
+        data, _ = self.mod.collect()
+        self.assertNotIn("goner", [s["name"] for s in data["servers"]])
+        self.assertEqual(data["ghosts"][0]["name"], "goner")
+        self.assertTrue(data["ghosts"][0]["denied"])
+        self.assertEqual(data["ghosts"][0]["projects"], [])
+
+    def test_build_prints_rudiment_lines(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"disabledMcpServers": ["goner"]}}})
+        out = self.run_cli("build", "--out", os.path.join(self.dir, "out"))
+        self.assertIn("RUDIMENT: goner", out)
 
     def test_secret_values_never_reach_payload(self):
         proj = self.make_project()
