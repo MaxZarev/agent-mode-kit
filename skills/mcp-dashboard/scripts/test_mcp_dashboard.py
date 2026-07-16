@@ -126,15 +126,17 @@ class TestMcpjsonState(Base):
 
 class TestParseChanges(Base):
     def test_full_block(self):
-        changes, vis, mode = self.mod.parse_changes(
+        changes, vis, mode, blocks = self.mod.parse_changes(
             "=== MCP CHANGES ===\n"
             "mode: desktop\n"
             "hide: /a\nshow: /b\n"
+            "unblock: claude.ai Notion\n"
             "project: /p\nadd: exa\nenable: x, claude.ai Gmail\ndisable: y\n"
             "cleanup: old-one\n"
             "=== END ===")
         self.assertEqual(vis, {"hide": ["/a"], "show": ["/b"]})
         self.assertEqual(mode, "desktop")
+        self.assertEqual(blocks, {"block": [], "unblock": ["claude.ai Notion"]})
         self.assertEqual(changes, [{"project": "/p",
                                     "enable": ["x", "claude.ai Gmail"],
                                     "disable": ["y"],
@@ -142,13 +144,19 @@ class TestParseChanges(Base):
                                     "add": ["exa"]}])
 
     def test_cleanup_only_block_kept(self):
-        changes, _, _ = self.mod.parse_changes("project: /p\ncleanup: ghost\n")
+        changes, _, _, _ = self.mod.parse_changes("project: /p\ncleanup: ghost\n")
         self.assertEqual(changes, [{"project": "/p", "enable": [],
                                     "disable": [], "cleanup": ["ghost"],
                                     "add": []}])
 
+    def test_block_lines_are_position_independent(self):
+        _, _, _, blocks = self.mod.parse_changes(
+            "project: /p\ndisable: x\nblock: bad-one, worse-one\nunblock: y\n")
+        self.assertEqual(blocks, {"block": ["bad-one", "worse-one"],
+                                  "unblock": ["y"]})
+
     def test_no_mode_line_is_none(self):
-        _, _, mode = self.mod.parse_changes("project: /p\ndisable: srv\n")
+        _, _, mode, _ = self.mod.parse_changes("project: /p\ndisable: srv\n")
         self.assertIsNone(mode)
 
     def test_bad_mode_exits(self):
@@ -156,7 +164,7 @@ class TestParseChanges(Base):
             self.mod.parse_changes("mode: web\n")
 
     def test_windows_path_value_keeps_colon(self):
-        changes, _, _ = self.mod.parse_changes(
+        changes, _, _, _ = self.mod.parse_changes(
             "project: C:\\Users\\x\\proj\ndisable: srv\n")
         self.assertEqual(changes[0]["project"], "C:\\Users\\x\\proj")
 
@@ -378,6 +386,63 @@ class TestApply(Base):
         self.assertNotIn("nosuch", json.dumps(
             self.read_config()["projects"][proj].get("mcpServers", {})))
 
+    def test_unblock_removes_from_both_settings_files(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"deniedMcpServers": [{"serverName": "context7"}],
+                       "otherKey": True}, f)
+        with open(os.path.join(self.dir, "settings.local.json"), "w") as f:
+            json.dump({"deniedMcpServers": ["context7", "keepme"]}, f)
+        ch = self.write_changes("unblock: context7\n")
+        out = self.run_cli("apply", ch)
+        s1 = json.load(open(os.path.join(self.dir, "settings.json")))
+        s2 = json.load(open(os.path.join(self.dir, "settings.local.json")))
+        self.assertEqual(s1["deniedMcpServers"], [])
+        self.assertTrue(s1["otherKey"])          # untouched keys preserved
+        self.assertEqual(s2["deniedMcpServers"], ["keepme"])
+        self.assertIn("unblock context7", out)
+        self.assertIn("Settings backup:", out)
+        self.assertNotIn("Backup:", out.replace("Settings backup:", ""))  # config untouched
+
+    def test_unblock_unknown_warns(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("unblock: never-blocked\n")
+        out = self.run_cli("apply", ch)
+        self.assertIn("not blocked", out)
+
+    def test_block_adds_to_settings(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        ch = self.write_changes("block: risky-one\n")
+        out = self.run_cli("apply", ch)
+        s = json.load(open(os.path.join(self.dir, "settings.json")))
+        self.assertIn({"serverName": "risky-one"}, s["deniedMcpServers"])
+        self.assertIn("block risky-one", out)
+
+    def test_unblock_then_enable_has_no_denied_warning(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"deniedMcpServers": ["context7"]}, f)
+        ch = self.write_changes(
+            "unblock: context7\nproject: %s\nenable: context7\n" % proj)
+        out = self.run_cli("apply", ch)
+        self.assertNotIn("won't unblock", out)
+        self.assertEqual(self.read_config()["projects"][proj]["disabledMcpServers"], [])
+
+    def test_unblock_dry_run_writes_nothing(self):
+        proj = self.make_project()
+        self.write_config(self.base_config(proj))
+        with open(os.path.join(self.dir, "settings.json"), "w") as f:
+            json.dump({"deniedMcpServers": ["context7"]}, f)
+        ch = self.write_changes("unblock: context7\n")
+        out = self.run_cli("apply", ch, "--dry-run")
+        self.assertIn("DRY RUN", out)
+        s = json.load(open(os.path.join(self.dir, "settings.json")))
+        self.assertEqual(s["deniedMcpServers"], ["context7"])
+
     def test_cleanup_removes_stale_entries_everywhere(self):
         proj = self.make_project()
         cfg = self.base_config(proj)
@@ -448,7 +513,7 @@ class TestBuildAndCollect(Base):
         html = open(os.path.join(out_dir, "mcp-dashboard.html"), encoding="utf-8").read()
         self.assertIn('"uiMode": "cli"', html)
 
-    def test_denied_server_state_blk(self):
+    def test_denied_server_flagged_with_underlying_state(self):
         proj = self.make_project()
         self.write_config({
             "mcpServers": {"context7": {"type": "http", "url": "https://c7/mcp"}},
@@ -456,7 +521,10 @@ class TestBuildAndCollect(Base):
         with open(os.path.join(self.dir, "settings.json"), "w") as f:
             json.dump({"deniedMcpServers": [{"serverName": "context7"}]}, f)
         data, _ = self.mod.collect()
-        self.assertEqual(data["states"]["context7"][proj], "blk")
+        srv = {s["name"]: s for s in data["servers"]}["context7"]
+        self.assertTrue(srv["denied"])
+        # underlying state kept so the page can preview a pending unblock
+        self.assertEqual(data["states"]["context7"][proj], "on")
 
     def test_ghost_not_a_server_column(self):
         proj = self.make_project()

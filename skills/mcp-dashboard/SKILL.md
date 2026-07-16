@@ -60,8 +60,10 @@ Then tell the user, briefly: the page is a matrix — **rows are projects, colum
 are servers**, grouped by where each server comes from (глобальные user scope /
 встроенные / коннекторы claude.ai / плагины / локальные / проектные `.mcp.json`).
 ✓ = enabled, ✕ = disabled, ? = a repo `.mcp.json` server not yet approved,
-— = not connected to that project, ⛔ = blocked by `deniedMcpServers` in
-`~/.claude/settings.json` (not clickable — unblocking means editing that file).
+— = not connected to that project, ⛔ = blocked globally by `deniedMcpServers`
+in `~/.claude/settings.json` — clicking the ⛔ in the «Все проекты» row queues
+an unblock (an `unblock:` line), after which the project cells become live for
+fine-tuning in the same batch.
 The top row **«Все проекты»** toggles a server at once in every project where
 it exists (± means "enabled in some projects, not all"); the project rows below
 are for fine-tuning. Local and `.mcp.json` servers show a faint «+» in projects
@@ -103,6 +105,7 @@ When the user pastes a block like:
 mode: cli
 hide: /Users/x/old-experiment
 show: /Users/x/comeback
+unblock: claude.ai Gmail
 project: /Users/x/proj
 add: exa
 enable: context7
@@ -123,7 +126,13 @@ the chat) from the project where it is already configured and un-disables it;
 for a repo `.mcp.json` server it merges the entry into the TARGET project's
 `.mcp.json` file and approves it (`enabledMcpjsonServers`) — tell the user a
 file in the target repo was changed, they may want to commit it. Global
-servers don't need `add:` (they're everywhere already).
+servers don't need `add:` (they're everywhere already). `unblock:` / `block:`
+are GLOBAL lines (no project needed): they remove/add the name in
+`deniedMcpServers` of `~/.claude/settings*.json` (timestamped backup of each
+touched settings file). Direct mode: «разблокируй Gmail» → `unblock:` line;
+«заблокируй X везде» → `block:` line. Caveat to relay: the Claude Desktop app
+ignores `deniedMcpServers` for claude.ai connectors — un/blocking them matters
+only for CLI/IDE sessions (the script warns about this in desktop mode).
 
 1. Save it **verbatim** to `<tmp>/mcp-changes.txt` (Write tool — avoids shell
    quoting issues; server names may contain spaces).
@@ -187,9 +196,12 @@ they work in the terminal, offer to switch the saved mode with a
   lines and shown in the page's «Рудименты» panel instead of the matrix.
   (Built-in servers — `claude-in-chrome`, `ide` — have no config definition by
   design and get their own «Встроенные» column group, not a rudiment flag.)
-- `deniedMcpServers` in `~/.claude/settings.json` (globally blocked servers) is
-  read-only for the script: such servers render as ⛔ and an `enable` attempt
-  prints a WARNING pointing at the settings file.
+- `deniedMcpServers` in `~/.claude/settings.json` + `settings.local.json`
+  (globally blocked servers, rendered as ⛔): `unblock:` removes the name from
+  both files, `block:` appends `{"serverName": …}` to `settings.json`. Only
+  that key is touched; each modified settings file gets a timestamped backup
+  (`.bak-mcpdash-…`). A per-project `enable` of a still-blocked name prints a
+  WARNING suggesting `unblock:` instead.
 - Everything else in `~/.claude.json` is left untouched; writes are atomic and
   preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`). The backup
   is skipped when the block contains only `hide:`/`show:` lines (config not touched).

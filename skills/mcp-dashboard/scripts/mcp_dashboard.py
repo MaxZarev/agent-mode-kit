@@ -260,12 +260,11 @@ def collect(include_missing=False):
             row(name, dynamic_group(name))
 
     for name, r in servers.items():
+        # blocked via settings.json — the page renders ⛔ and offers an unblock
+        r["denied"] = name in denied
         st = states.setdefault(name, {})
         for p in projects:
             path, entry = p["path"], raw_projects[p["path"]]
-            if name in denied:  # blocked in user settings — overrides everything
-                st[path] = "blk"
-                continue
             if path in st:
                 continue
             disabled = name in (entry.get("disabledMcpServers") or [])
@@ -353,6 +352,8 @@ def parse_changes(text):
     mode: desktop
     hide: /abs/other-path
     show: /abs/third-path
+    unblock: claude.ai Gmail
+    block: something-risky
     project: /abs/path
     enable: a, b
     disable: c
@@ -362,13 +363,15 @@ def parse_changes(text):
 
     hide/show are project-VISIBILITY lines (one path each, position-independent);
     mode is the page's "where do you work" switch (cli | desktop). All three go
-    to the skill's state file, not to ~/.claude.json. cleanup removes stale
-    leftovers of deleted servers from the project's disable/approval lists.
-    add connects an existing local-scope server to this project by copying its
-    definition from the project where it is already configured.
+    to the skill's state file, not to ~/.claude.json. block/unblock are GLOBAL
+    (position-independent) and edit deniedMcpServers in ~/.claude/settings*.json.
+    cleanup removes stale leftovers of deleted servers from the project's
+    disable/approval lists. add connects an existing server to this project by
+    copying its definition from where it is already configured.
     """
     changes, current, mode = [], None, None
     visibility = {"hide": [], "show": []}
+    blocks = {"block": [], "unblock": []}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("==="):
@@ -381,6 +384,8 @@ def parse_changes(text):
             changes.append(current)
         elif key in ("enable", "disable", "cleanup", "add") and current is not None:
             current[key] += [n.strip() for n in value.split(",") if n.strip()]
+        elif key in ("block", "unblock"):
+            blocks[key] += [n.strip() for n in value.split(",") if n.strip()]
         elif key in ("hide", "show") and value:
             visibility[key].append(value)
         elif key == "mode":
@@ -391,7 +396,7 @@ def parse_changes(text):
             sys.exit("ERROR: unrecognized line in changes block: %r" % line)
     return ([c for c in changes
              if c["enable"] or c["disable"] or c["cleanup"] or c["add"]],
-            visibility, mode)
+            visibility, mode, blocks)
 
 
 def _toggle_mcpjson(entry, name, action, warnings, path):
@@ -417,9 +422,11 @@ def _toggle_mcpjson(entry, name, action, warnings, path):
 
 def cmd_apply(args):
     with open(args.changes_file, "r", encoding="utf-8") as f:
-        changes, visibility, mode = parse_changes(f.read())
-    if not changes and not visibility["hide"] and not visibility["show"] and not mode:
-        sys.exit("Nothing to apply: the block contains no enable/disable/hide/show/mode lines.")
+        changes, visibility, mode, blocks = parse_changes(f.read())
+    if (not changes and not visibility["hide"] and not visibility["show"]
+            and not mode and not blocks["block"] and not blocks["unblock"]):
+        sys.exit("Nothing to apply: the block contains no "
+                 "enable/disable/add/cleanup/block/unblock/hide/show/mode lines.")
 
     config = read_json(CLAUDE_JSON)
     if config is None:
@@ -447,7 +454,69 @@ def cmd_apply(args):
         hidden.discard(path)
         vis_log.append("show %s (dashboard only)" % home_short(path))
 
-    log, warnings = [], []
+    log, slog, warnings = [], [], []
+
+    # global block/unblock: deniedMcpServers in ~/.claude/settings*.json
+    settings_dir = (os.environ.get("CLAUDE_CONFIG_DIR")
+                    or os.path.join(os.path.expanduser("~"), ".claude"))
+    settings_backups = {}   # file path -> backup path (one backup per file)
+
+    def write_settings(fname, data):
+        spath = os.path.join(settings_dir, fname)
+        if args.dry_run:
+            return
+        if os.path.exists(spath) and spath not in settings_backups:
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            bak = spath + ".bak-mcpdash-" + stamp
+            shutil.copy2(spath, bak)
+            settings_backups[spath] = bak
+        fd, tmp = tempfile.mkstemp(dir=settings_dir, prefix="." + fname + ".")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, spath)
+
+    def denied_name(item):
+        return item.get("serverName") if isinstance(item, dict) else item
+
+    for name in blocks["unblock"]:
+        if name not in denied:
+            warnings.append("%r is not blocked — nothing to unblock." % name)
+            continue
+        for fname in ("settings.json", "settings.local.json"):
+            data = read_json(os.path.join(settings_dir, fname))
+            lst = (data or {}).get("deniedMcpServers")
+            if not isinstance(lst, list):
+                continue
+            kept = [item for item in lst if denied_name(item) != name]
+            if len(kept) != len(lst):
+                data["deniedMcpServers"] = kept
+                write_settings(fname, data)
+        denied.discard(name)
+        slog.append("unblock %s (deniedMcpServers, ~/.claude/settings*.json)" % name)
+        if ui_mode == "desktop" and name.startswith(CONNECTOR_PREFIX):
+            warnings.append("%r is a claude.ai connector — the Claude Desktop app "
+                            "ignores deniedMcpServers for connectors, so unblocking "
+                            "matters only for CLI/IDE sessions." % name)
+    for name in blocks["block"]:
+        if name in denied:
+            warnings.append("%r is already blocked." % name)
+            continue
+        data = read_json(os.path.join(settings_dir, "settings.json")) or {}
+        lst = data.setdefault("deniedMcpServers", [])
+        if not isinstance(lst, list):
+            warnings.append("deniedMcpServers in settings.json is not a list — "
+                            "edit that file manually; %r not blocked." % name)
+            continue
+        lst.append({"serverName": name})
+        write_settings("settings.json", data)
+        denied.add(name)
+        slog.append("block %s globally (deniedMcpServers, settings.json)" % name)
+        if ui_mode == "desktop" and name.startswith(CONNECTOR_PREFIX):
+            warnings.append("%r is a claude.ai connector — the Claude Desktop app "
+                            "ignores deniedMcpServers for connectors; the block "
+                            "matters only for CLI/IDE sessions." % name)
+
     for change in changes:
         path = change["project"]
         entry = raw_projects.get(path)
@@ -564,7 +633,8 @@ def cmd_apply(args):
                 if action == "enable" and name in denied:
                     warnings.append("%r is blocked by deniedMcpServers in "
                                     "~/.claude/settings.json — per-project enable "
-                                    "won't unblock it; remove it there instead." % name)
+                                    "won't unblock it; use an 'unblock:' line "
+                                    "(or the ⛔ in the «Все проекты» row)." % name)
                 if ui_mode == "desktop" and name.startswith(CONNECTOR_PREFIX):
                     warnings.append("%r is a claude.ai connector and the dashboard "
                                     "mode is Desktop — the Claude Desktop app pulls "
@@ -593,7 +663,7 @@ def cmd_apply(args):
 
     if args.dry_run:
         print("DRY RUN — nothing written. Would apply:")
-        print("\n".join("  " + l for l in log + vis_log))
+        print("\n".join("  " + l for l in slog + log + vis_log))
         for w in warnings:
             print("WARNING: " + w)
         return
@@ -614,12 +684,15 @@ def cmd_apply(args):
             state["uiMode"] = mode
         save_state(state)
 
-    print("Applied %d change(s):" % len(log + vis_log))
-    print("\n".join("  " + l for l in log + vis_log))
+    print("Applied %d change(s):" % len(slog + log + vis_log))
+    print("\n".join("  " + l for l in slog + log + vis_log))
     for w in warnings:
         print("WARNING: " + w)
     if backup:
         print("Backup: %s" % backup)
+    for bak in settings_backups.values():
+        print("Settings backup: %s" % bak)
+    if backup or settings_backups:
         print("NOTE: changes take effect in NEW Claude Code sessions; other sessions "
               "running right now may overwrite them — re-run `build` to verify.")
 
