@@ -19,6 +19,7 @@ import re
 import shutil
 import sys
 import tempfile
+from urllib.parse import urlsplit, urlunsplit
 
 # CLAUDE_CONFIG_DIR relocates ~/.claude.json (same rule Claude Code itself uses)
 CLAUDE_JSON = os.path.join(
@@ -29,6 +30,8 @@ STATE_FILE = os.path.join(
     or os.path.join(os.path.expanduser("~"), ".claude"), "mcp-dashboard.json")
 SECRETISH_FLAG = re.compile(r"(key|token|secret|pass|auth|bearer|credential)", re.I)
 SECRETISH_VALUE = re.compile(r"^[A-Za-z0-9_\-\.=+/]{20,}$")
+PATHISH = re.compile(r"^([/~.]|[A-Za-z]:[\\/])")  # filesystem paths are not secrets
+URLISH = re.compile(r"^\w+://")
 MASK = "•••"  # •••
 
 
@@ -64,24 +67,33 @@ def home_short(path):
 
 
 def redact_url(url):
-    """Keep scheme+host+path, mask query values and token-looking path segments."""
-    m = re.match(r"^(\w+://[^/?#]+)([^?#]*)(\?.*)?$", url or "")
-    if not m:
+    """Keep scheme+host+path; mask userinfo, query, fragment and token-looking
+    path segments — credentials can hide in any of those."""
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return MASK
+    if not parts.scheme or not parts.netloc:
         return url
-    base, path, query = m.group(1), m.group(2) or "", m.group(3)
-    segs = []
-    for seg in path.split("/"):
-        segs.append(MASK if SECRETISH_VALUE.match(seg) else seg)
-    out = base + "/".join(segs)
-    if query:
-        out += "?" + MASK
-    return out
+    netloc = parts.netloc
+    if "@" in netloc:
+        netloc = MASK + "@" + netloc.rsplit("@", 1)[1]
+    path = "/".join(MASK if SECRETISH_VALUE.match(seg) else seg
+                    for seg in parts.path.split("/"))
+    return urlunsplit((parts.scheme, netloc, path,
+                       MASK if parts.query else "",
+                       MASK if parts.fragment else ""))
 
 
 def redact_args(args):
     out, prev_flag_secret = [], False
     for a in args or []:
-        if prev_flag_secret or SECRETISH_VALUE.match(a):
+        a = str(a)
+        if prev_flag_secret:
+            out.append(MASK)
+        elif URLISH.match(a):
+            out.append(redact_url(a))
+        elif SECRETISH_VALUE.match(a) and not PATHISH.match(a):
             out.append(MASK)
         elif "=" in a and SECRETISH_FLAG.search(a.split("=", 1)[0]):
             out.append(a.split("=", 1)[0] + "=" + MASK)
@@ -104,6 +116,20 @@ def describe_server(defn):
 
 
 # ---------------------------------------------------------------- build
+
+def load_denied_servers():
+    """User-scope deniedMcpServers from settings.json / settings.local.json —
+    globally blocked servers (entries are {"serverName": X} objects or strings)."""
+    base = (os.environ.get("CLAUDE_CONFIG_DIR")
+            or os.path.join(os.path.expanduser("~"), ".claude"))
+    denied = set()
+    for fname in ("settings.json", "settings.local.json"):
+        for item in (read_json(os.path.join(base, fname)) or {}).get("deniedMcpServers") or []:
+            name = item.get("serverName") if isinstance(item, dict) else item
+            if name:
+                denied.add(name)
+    return denied
+
 
 def load_project_settings(path):
     """Merge .mcp.json approval keys from .claude/settings.json + settings.local.json."""
@@ -180,10 +206,18 @@ def collect(include_missing=False):
             if name not in servers:
                 row(name, "dynamic")
 
+    denied = load_denied_servers()
+    for name in sorted(denied):
+        if name not in servers:
+            row(name, "dynamic")
+
     for name, r in servers.items():
         st = states.setdefault(name, {})
         for p in projects:
             path, entry = p["path"], raw_projects[p["path"]]
+            if name in denied:  # blocked in user settings — overrides everything
+                st[path] = "blk"
+                continue
             if path in st:
                 continue
             disabled = name in (entry.get("disabledMcpServers") or [])
@@ -275,6 +309,27 @@ def parse_changes(text):
     return [c for c in changes if c["enable"] or c["disable"]], visibility
 
 
+def _toggle_mcpjson(entry, name, action, warnings, path):
+    """Flip a .mcp.json server between the enabled/disabled arrays of a project
+    entry. Mutates only lists — the string "all" is left as-is (it already
+    covers every server), except that a denylist "all" makes enable impossible."""
+    add_key, rem_key = (("enabledMcpjsonServers", "disabledMcpjsonServers")
+                        if action == "enable"
+                        else ("disabledMcpjsonServers", "enabledMcpjsonServers"))
+    rem = entry.get(rem_key)
+    if isinstance(rem, list):
+        entry[rem_key] = [n for n in rem if n != name]
+    elif rem == "all" and action == "enable":
+        warnings.append('%s has disabledMcpjsonServers: "all" — enabling %r via '
+                        "the project entry won't take effect; the denylist wins."
+                        % (home_short(path), name))
+    if entry.get(add_key) == "all":
+        return  # "all" already covers the target state
+    lst = entry.setdefault(add_key, [])
+    if isinstance(lst, list) and name not in lst:
+        lst.append(name)
+
+
 def cmd_apply(args):
     with open(args.changes_file, "r", encoding="utf-8") as f:
         changes, visibility = parse_changes(f.read())
@@ -285,7 +340,9 @@ def cmd_apply(args):
     if config is None:
         sys.exit("ERROR: cannot read %s" % CLAUDE_JSON)
     raw_projects = config.get("projects") or {}
-    _, mcpjson_names = collect(include_missing=True)
+    data, mcpjson_names = collect(include_missing=True)
+    known_names = set(s["name"] for s in data["servers"])
+    denied = load_denied_servers()
 
     state = load_state()
     hidden = set(state.get("hiddenProjects") or [])
@@ -310,6 +367,14 @@ def cmd_apply(args):
         in_mcpjson = mcpjson_names.get(path, set())
         for action in ("enable", "disable"):
             for name in change[action]:
+                if name not in known_names:
+                    warnings.append("%r is not a server name the dashboard knows — "
+                                    "applied anyway (normal for a claude.ai connector "
+                                    "never toggled before; double-check for typos)." % name)
+                if action == "enable" and name in denied:
+                    warnings.append("%r is blocked by deniedMcpServers in "
+                                    "~/.claude/settings.json — per-project enable "
+                                    "won't unblock it; remove it there instead." % name)
                 if name in in_mcpjson:
                     pinned = load_project_settings(path)
                     for key in ("enabledMcpjsonServers", "disabledMcpjsonServers"):
@@ -319,13 +384,7 @@ def cmd_apply(args):
                                 "%r is pinned in %s/.claude/settings*.json (%s) — that "
                                 "file wins over this change; edit it if the toggle "
                                 "doesn't take effect." % (name, home_short(path), key))
-                    en = entry.setdefault("enabledMcpjsonServers", [])
-                    dis = entry.setdefault("disabledMcpjsonServers", [])
-                    (dis if action == "enable" else en)[:] = \
-                        [n for n in (dis if action == "enable" else en) if n != name]
-                    target = en if action == "enable" else dis
-                    if name not in target:
-                        target.append(name)
+                    _toggle_mcpjson(entry, name, action, warnings, path)
                 else:
                     dis = entry.setdefault("disabledMcpServers", [])
                     if action == "disable" and name not in dis:
@@ -337,17 +396,20 @@ def cmd_apply(args):
     if args.dry_run:
         print("DRY RUN — nothing written. Would apply:")
         print("\n".join("  " + l for l in log + vis_log))
+        for w in warnings:
+            print("WARNING: " + w)
         return
 
     backup = None
     if log:  # ~/.claude.json is touched only for real server changes
+        target = os.path.realpath(CLAUDE_JSON)  # keep symlinked configs intact
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = CLAUDE_JSON + ".bak-mcpdash-" + stamp
-        shutil.copy2(CLAUDE_JSON, backup)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CLAUDE_JSON), prefix=".claude.json.")
+        backup = target + ".bak-mcpdash-" + stamp
+        shutil.copy2(target, backup)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".claude.json.")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, CLAUDE_JSON)
+        os.replace(tmp, target)
     if vis_log:
         state["hiddenProjects"] = sorted(hidden)
         save_state(state)

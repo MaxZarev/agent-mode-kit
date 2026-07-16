@@ -51,8 +51,16 @@ Open the page for the user:
 
 Then tell the user, briefly: the page shows every MCP server and every project;
 ✓ = enabled, ✕ = disabled, ? = a repo `.mcp.json` server not yet approved,
-— = not connected to that project. To change something: click the cells, press
-**«Скопировать изменения»**, and paste the copied block back into the chat.
+— = not connected to that project, ⛔ = blocked by `deniedMcpServers` in
+`~/.claude/settings.json` (not clickable — unblocking means editing that file).
+To change something: click the cells, press **«Скопировать изменения»**, and
+paste the copied block back into the chat.
+
+Known limitation to keep in mind: claude.ai connectors and plugin servers are
+listed only once they've been toggled off somewhere via `/mcp` — the local
+config has no registry of "enabled everywhere" connectors. If the user asks
+about a connector that isn't listed, it may still exist; disabling it by name
+via Direct mode works (the script warns about unknown names but applies).
 
 If the user only wanted to *see* the picture — you're done after opening the page.
 
@@ -117,6 +125,9 @@ read nothing but the printed path. Report the same way as in Step 2.
   `.claude/settings*.json` inside the project — the script *reads* those for
   state (denylist wins) but never writes them; if a name is pinned there, the
   script prints a WARNING and the user must edit that file instead.
+- `deniedMcpServers` in `~/.claude/settings.json` (globally blocked servers) is
+  read-only for the script: such servers render as ⛔ and an `enable` attempt
+  prints a WARNING pointing at the settings file.
 - Everything else in `~/.claude.json` is left untouched; writes are atomic and
   preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`). The backup
   is skipped when the block contains only `hide:`/`show:` lines (config not touched).
