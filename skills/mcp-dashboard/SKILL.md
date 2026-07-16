@@ -75,20 +75,28 @@ paste the copied block back into the chat.
 
 The page has a "where do you work" switch (top-left), **«Claude Desktop» by
 default**, remembered between runs. In Desktop mode the claude.ai connector
-columns collapse into one non-clickable column «управляется в приложении
-Claude Desktop»: the Desktop app pulls connectors straight from the claude.ai
-account and ignores per-project config entirely (`disabledMcpServers`,
-`deniedMcpServers`, `disableClaudeAiConnectors` — verified), so toggling them
-from here would change nothing — the user switches them via the tools icon in
-the app itself or by unlinking the connector on claude.ai. Users working in
-Claude Code CLI/IDE switch to «Claude Code (CLI)» — there per-project connector
-toggles do work. All other groups are toggleable in both modes.
+columns collapse into one non-clickable column that lists the account's
+connectors with their in-app state (✓ on / ✕ off / ± partially, tool count and
+snapshot date in the tooltip): the Desktop app pulls connectors straight from
+the claude.ai account and ignores per-project config entirely
+(`disabledMcpServers`, `deniedMcpServers`, `disableClaudeAiConnectors` —
+verified), so toggling them from here would change nothing — the user switches
+them via the tools icon in the app itself or by unlinking the connector on
+claude.ai. Users working in Claude Code CLI/IDE switch to «Claude Code (CLI)»
+— there per-project connector toggles do work, and discovered connectors show
+a small «🖥 <date>» origin badge in the column header. All other groups are
+toggleable in both modes.
 
-Known limitation to keep in mind: claude.ai connectors and plugin servers are
-listed only once they've been toggled off somewhere via `/mcp` — the local
-config has no registry of "enabled everywhere" connectors. If the user asks
-about a connector that isn't listed, it may still exist; disabling it by name
-via Direct mode works (the script warns about unknown names but applies).
+Where the connector list comes from: when the Claude Desktop app is installed
+(macOS / Windows), `build` reads its per-session state snapshots — read-only —
+and picks up the full list of the account's connectors plus their app-level
+state. That data is a snapshot as of the last Desktop session, not live. The
+in-app state (column header) and the per-project ✓/✕ cells are DIFFERENT
+layers — the cells still reflect only `disabledMcpServers`. On machines
+without Desktop the old limitation stands: a connector appears only once it's
+been toggled off somewhere via `/mcp`; if the user asks about a connector that
+isn't listed, it may still exist — disabling it by name via Direct mode works
+(the script warns about unknown names but applies).
 
 If the user only wanted to *see* the picture — you're done after opening the page.
 
@@ -202,6 +210,14 @@ they work in the terminal, offer to switch the saved mode with a
   that key is touched; each modified settings file gets a timestamped backup
   (`.bak-mcpdash-…`). A per-project `enable` of a still-blocked name prints a
   WARNING suggesting `unblock:` instead.
+- Connector discovery READS Claude Desktop's session snapshots
+  (`claude-code-sessions/*/*/local_*.json` under
+  `~/Library/Application Support/Claude` on macOS / `%APPDATA%\Claude` on
+  Windows; at most the 5 freshest usable files) — those files belong to the
+  app and are **never written or modified** by this skill. No Desktop data →
+  discovery silently turns off, nothing else changes. The app-level tool
+  toggles (`enabledMcpTools`) are the app's territory — the skill only
+  displays them, `apply` cannot change them.
 - Everything else in `~/.claude.json` is left untouched; writes are atomic and
   preceded by a timestamped backup (`~/.claude.json.bak-mcpdash-…`). The backup
   is skipped when the block contains only `hide:`/`show:` lines (config not touched).

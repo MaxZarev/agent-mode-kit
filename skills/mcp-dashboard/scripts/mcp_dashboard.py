@@ -2,7 +2,8 @@
 """mcp-dashboard — inspect and edit per-project MCP server config of Claude Code.
 
 Subcommands:
-  build  — parse ~/.claude.json (+ per-project .mcp.json / .claude/settings*.json),
+  build  — parse ~/.claude.json (+ per-project .mcp.json / .claude/settings*.json,
+           + read-only Claude Desktop session snapshots for claude.ai connectors),
            render a single-file HTML dashboard, print its absolute path.
   apply  — read a "=== MCP CHANGES ===" block (produced by the dashboard page)
            from a file, back up ~/.claude.json and apply the changes.
@@ -13,6 +14,7 @@ Secrets (env values, headers, key-looking tokens in args/URLs) never reach the H
 
 import argparse
 import datetime
+import glob
 import json
 import os
 import re
@@ -41,6 +43,9 @@ PLUGIN_PREFIX = "plugin:"
 # servers built into Claude Code itself — no definition anywhere in the config,
 # yet per-project disabling via disabledMcpServers is perfectly legitimate
 BUILTIN_SERVERS = {"claude-in-chrome", "ide"}
+# Claude Desktop session snapshots are large (full tool schemas inside) —
+# read only this many of the freshest usable ones when discovering connectors
+DISCOVER_SNAPSHOT_LIMIT = 5
 
 
 # ---------------------------------------------------------------- helpers
@@ -185,6 +190,78 @@ def dynamic_group(name):
     return None
 
 
+def desktop_root():
+    """Claude Desktop's data dir; None when the platform has no Desktop app."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        return os.path.join(base, "Claude") if base else None
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"),
+                            "Library", "Application Support", "Claude")
+    return None
+
+
+def discover_desktop_connectors(root=None):
+    """claude.ai connectors of the account, read from Claude Desktop's
+    per-session state snapshots (claude-code-sessions/*/*/local_*.json).
+
+    The snapshots are READ-ONLY for this script — they belong to the app.
+    Newest files win; a few sessions are merged so a connector missing from
+    the very last session isn't lost. Tool-state semantics (verified live on
+    macOS and Windows): value False = tool off, True = on, an absent
+    "uuid:tool" key = on by default; entries under uuids not present in
+    remoteMcpServersConfig are stale and ignored.
+
+    Returns {name: {"appState": on|off|partial, "toolCount", "snapshotAt"}}
+    or None when there is no Desktop data — then the dashboard behaves
+    exactly as it did without discovery.
+    """
+    root = root or desktop_root()
+    if not root:
+        return None
+
+    def mtime(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    files = glob.glob(os.path.join(root, "claude-code-sessions",
+                                   "*", "*", "local_*.json"))
+    files.sort(key=mtime, reverse=True)
+    found, used = {}, 0
+    for path in files:
+        if used >= DISCOVER_SNAPSHOT_LIMIT:
+            break
+        snap = read_json(path)   # unreadable / broken JSON -> skipped silently
+        if not isinstance(snap, dict):
+            continue
+        remote = snap.get("remoteMcpServersConfig")
+        if not isinstance(remote, list) or not remote:
+            continue
+        used += 1
+        enabled = snap.get("enabledMcpTools")
+        if not isinstance(enabled, dict):
+            enabled = {}
+        stamp = datetime.datetime.fromtimestamp(mtime(path)).isoformat(
+            sep=" ", timespec="minutes")
+        for srv in remote:
+            if not isinstance(srv, dict) or not srv.get("name"):
+                continue
+            name = str(srv["name"])
+            if name in found:   # freshest file wins; older ones only add names
+                continue
+            tools = [t.get("name") for t in srv.get("tools") or []
+                     if isinstance(t, dict) and t.get("name")]
+            off = [enabled.get("%s:%s" % (srv.get("uuid"), t)) is False
+                   for t in tools]
+            state = ("off" if tools and all(off)
+                     else "partial" if any(off) else "on")
+            found[name] = {"appState": state, "toolCount": len(tools),
+                           "snapshotAt": stamp}
+    return found or None
+
+
 def collect(include_missing=False):
     config = read_json(CLAUDE_JSON)
     if config is None:
@@ -225,7 +302,16 @@ def collect(include_missing=False):
             row(name, "mcpjson", defn, defined_in=path)
             states.setdefault(name, {})[path] = mcpjson_state(name, entry, settings)
 
-    # 2. Names that live only in disable/approval lists. Connectors and plugin
+    # 2. claude.ai connectors of the account, discovered from Claude Desktop
+    #    session snapshots — the registry the local config lacks. A connector
+    #    already known from disable lists just gets enriched (row() dedups by
+    #    name); no Desktop data on this machine -> nothing changes here.
+    for name, info in sorted((discover_desktop_connectors() or {}).items()):
+        r = row(CONNECTOR_PREFIX + name, "connector")
+        r["discovered"] = True
+        r.update(info)   # appState / toolCount / snapshotAt
+
+    # 3. Names that live only in disable/approval lists. Connectors and plugin
     #    servers are real despite having no definition here; every other such
     #    name is a "ghost" — a leftover of a server that was since removed.
     #    Ghosts go to a cleanup list instead of masquerading as servers.

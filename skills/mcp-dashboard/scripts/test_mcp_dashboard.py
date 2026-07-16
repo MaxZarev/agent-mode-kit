@@ -25,12 +25,23 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
         os.environ["CLAUDE_CONFIG_DIR"] = self.dir
+        # point HOME/APPDATA into the sandbox too, so connector discovery never
+        # sees the real Claude Desktop data of the machine running the tests
+        self._env = {k: os.environ.get(k)
+                     for k in ("HOME", "APPDATA", "USERPROFILE")}
+        for k in self._env:
+            os.environ[k] = self.dir
         import mcp_dashboard
         self.mod = importlib.reload(mcp_dashboard)
 
     def tearDown(self):
         self.tmp.cleanup()
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        for k, v in self._env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     def write_config(self, cfg):
         with open(os.path.join(self.dir, ".claude.json"), "w", encoding="utf-8") as f:
@@ -605,6 +616,147 @@ class TestBuildAndCollect(Base):
         payload = json.dumps(data, ensure_ascii=False)
         for secret in ("PW12345", "tok=QQ", "HEADERSECRET", "ARGSECRET123", "ENVSECRET"):
             self.assertNotIn(secret, payload)
+
+
+class TestDesktopDiscovery(Base):
+    """discover_desktop_connectors() over a fake Claude Desktop data dir."""
+
+    def setUp(self):
+        super().setUp()
+        self.root = os.path.join(self.dir, "DesktopData")
+
+    def snap(self, fname, servers, mtime=None, raw=None):
+        """Write a fake session snapshot. `servers` is a list of
+        (name, uuid, {tool: True|False|None}) — None means "no uuid:tool key"."""
+        d = os.path.join(self.root, "claude-code-sessions", "acc", "ws")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, fname)
+        if raw is None:
+            remote, enabled = [], {}
+            for name, uuid, tools in servers:
+                remote.append({"uuid": uuid, "name": name,
+                               "tools": [{"name": t} for t in tools]})
+                for t, v in tools.items():
+                    if v is not None:
+                        enabled["%s:%s" % (uuid, t)] = v
+            raw = json.dumps({"remoteMcpServersConfig": remote,
+                              "enabledMcpTools": enabled})
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(raw)
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def test_app_state_semantics(self):
+        self.snap("local_a.json", [
+            ("AllOff", "u1", {"t1": False, "t2": False}),
+            ("AllOn", "u2", {"t1": True, "t2": True}),
+            ("Mixed", "u3", {"t1": True, "t2": False}),
+            ("NoKeys", "u4", {"t1": None, "t2": None}),      # default = on
+            ("SomeKeys", "u5", {"t1": True, "t2": None}),    # still on
+        ])
+        found = self.mod.discover_desktop_connectors(root=self.root)
+        states = {n: v["appState"] for n, v in found.items()}
+        self.assertEqual(states, {"AllOff": "off", "AllOn": "on",
+                                  "Mixed": "partial", "NoKeys": "on",
+                                  "SomeKeys": "on"})
+        self.assertEqual(found["AllOff"]["toolCount"], 2)
+
+    def test_stale_uuid_entries_ignored(self):
+        # enabledMcpTools keeps false entries under a uuid that is no longer
+        # in remoteMcpServersConfig — they must not affect the live connector
+        d = os.path.join(self.root, "claude-code-sessions", "acc", "ws")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "local_a.json"), "w") as f:
+            json.dump({"remoteMcpServersConfig": [
+                           {"uuid": "new", "name": "Srv",
+                            "tools": [{"name": "t1"}, {"name": "t2"}]}],
+                       "enabledMcpTools": {"old:t1": False, "old:t2": False}}, f)
+        found = self.mod.discover_desktop_connectors(root=self.root)
+        self.assertEqual(found["Srv"]["appState"], "on")
+
+    def test_merge_freshest_wins_older_names_kept(self):
+        self.snap("local_old.json", [
+            ("Gmail", "u1", {"t": True}),
+            ("Notion", "u2", {"t": True})], mtime=1000)
+        self.snap("local_new.json", [
+            ("Gmail", "u1", {"t": False})], mtime=2000)
+        found = self.mod.discover_desktop_connectors(root=self.root)
+        self.assertEqual(found["Gmail"]["appState"], "off")   # from the new file
+        self.assertEqual(found["Notion"]["appState"], "on")   # not lost
+        self.assertGreater(found["Gmail"]["snapshotAt"],
+                           found["Notion"]["snapshotAt"])
+
+    def test_snapshot_limit_respected(self):
+        for i in range(10):
+            self.snap("local_%d.json" % i,
+                      [("Srv%d" % i, "u%d" % i, {"t": True})],
+                      mtime=1000 + i)
+        found = self.mod.discover_desktop_connectors(root=self.root)
+        # only the 5 freshest files are read
+        self.assertEqual(sorted(found),
+                         ["Srv%d" % i for i in range(5, 10)])
+
+    def test_broken_and_empty_files_skipped_silently(self):
+        self.snap("local_broken.json", [], mtime=3000, raw="{not json")
+        self.snap("local_empty.json", [], mtime=2900,
+                  raw=json.dumps({"remoteMcpServersConfig": []}))
+        self.snap("local_good.json", [("Srv", "u1", {"t": True})], mtime=2800)
+        found = self.mod.discover_desktop_connectors(root=self.root)
+        self.assertEqual(list(found), ["Srv"])
+
+    def test_no_data_returns_none(self):
+        self.assertIsNone(self.mod.discover_desktop_connectors(
+            root=os.path.join(self.dir, "nowhere")))
+        os.makedirs(os.path.join(self.root, "claude-code-sessions"),
+                    exist_ok=True)   # dir exists but has no session files
+        self.assertIsNone(self.mod.discover_desktop_connectors(root=self.root))
+
+    def test_collect_discovers_and_dedups_with_disable_lists(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"disabledMcpServers": ["claude.ai Gmail"]}}})
+        self.snap("local_a.json", [("Gmail", "u1", {"t1": True, "t2": True}),
+                                   ("Drive", "u2", {"t1": True})])
+        self.mod.desktop_root = lambda: self.root
+        data, _ = self.mod.collect()
+        srv = {s["name"]: s for s in data["servers"]}
+        self.assertEqual(srv["claude.ai Gmail"]["group"], "connector")
+        self.assertTrue(srv["claude.ai Gmail"]["discovered"])   # one column, enriched
+        self.assertEqual(srv["claude.ai Gmail"]["appState"], "on")
+        self.assertEqual(srv["claude.ai Gmail"]["toolCount"], 2)
+        self.assertIn("snapshotAt", srv["claude.ai Gmail"])
+        self.assertEqual(srv["claude.ai Drive"]["appState"], "on")
+        # per-project cells still come from disabledMcpServers, not appState
+        self.assertEqual(data["states"]["claude.ai Gmail"][proj], "off")
+        self.assertEqual(data["states"]["claude.ai Drive"][proj], "on")
+        self.assertEqual(data["ghosts"], [])
+
+    def test_collect_without_desktop_data_has_no_discovered_fields(self):
+        proj = self.make_project()
+        self.write_config({
+            "mcpServers": {},
+            "projects": {proj: {"disabledMcpServers": ["claude.ai Gmail"]}}})
+        data, _ = self.mod.collect()
+        srv = {s["name"]: s for s in data["servers"]}["claude.ai Gmail"]
+        self.assertEqual(srv["group"], "connector")
+        self.assertNotIn("discovered", srv)
+        self.assertNotIn("appState", srv)
+
+    def test_apply_knows_discovered_connector(self):
+        proj = self.make_project()
+        self.write_config({"mcpServers": {}, "projects": {proj: {}}})
+        self.snap("local_a.json", [("Gmail", "u1", {"t": True})])
+        self.mod.desktop_root = lambda: self.root
+        p = os.path.join(self.dir, "changes.txt")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("mode: cli\nproject: %s\ndisable: claude.ai Gmail\n" % proj)
+        out = self.run_cli("apply", p)
+        # a discovered connector is a known name — no typo warning
+        self.assertNotIn("WARNING", out)
+        self.assertIn("claude.ai Gmail",
+                      self.read_config()["projects"][proj]["disabledMcpServers"])
 
 
 if __name__ == "__main__":
